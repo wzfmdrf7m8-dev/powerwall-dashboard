@@ -88,6 +88,43 @@ def api(tok, method, path, **kw):
     return r.json().get("response")
 
 
+def fetch_octopus(key: str, acct: str, now) -> dict:
+    """Pull meter points, half-hourly consumption and unit rates from Octopus."""
+    s = requests.Session()
+    s.auth = (key, "")
+    base = "https://api.octopus.energy/v1"
+    account = s.get(f"{base}/accounts/{acct}/", timeout=30).json()
+    start = (now - datetime.timedelta(days=3)).isoformat()
+    out = {}
+    for prop in account.get("properties", []):
+        for mp in prop.get("electricity_meter_points", []):
+            kind = "export" if mp.get("is_export") else "import"
+            mpan = mp.get("mpan")
+            serial = None
+            for m in mp.get("meters", []):
+                if m.get("serial_number"):
+                    serial = m["serial_number"]
+            tariff = None
+            for ag in mp.get("agreements", []):
+                vt = ag.get("valid_to")
+                if vt is None or vt > now.isoformat():
+                    tariff = ag.get("tariff_code")
+            cons, rates = [], []
+            if serial:
+                r = s.get(f"{base}/electricity-meter-points/{mpan}/meters/{serial}/consumption/",
+                          params={"period_from": start, "page_size": 200, "order_by": "period"}, timeout=30)
+                if r.ok:
+                    cons = r.json().get("results", [])
+            if tariff:
+                product = "-".join(tariff.split("-")[2:-1])
+                r = s.get(f"{base}/products/{product}/electricity-tariffs/{tariff}/standard-unit-rates/",
+                          params={"period_from": start, "page_size": 200}, timeout=30)
+                if r.ok:
+                    rates = r.json().get("results", [])
+            out[kind] = {"mpan": mpan, "tariff": tariff, "consumption": cons, "rates": rates}
+    return out
+
+
 def main():
     tokens = get_tokens()
     tok = tokens["access_token"]
@@ -193,7 +230,17 @@ def main():
     except Exception as e:
         energy = {"error": str(e)[:200]}
 
+    # ----- Octopus Energy (optional) -----
+    octopus = None
+    okey, oacct = os.environ.get("OCTOPUS_API_KEY"), os.environ.get("OCTOPUS_ACCOUNT")
+    if okey and oacct:
+        try:
+            octopus = fetch_octopus(okey, oacct, now)
+        except Exception as e:
+            octopus = {"error": str(e)[:200]}
+
     bundle = {
+        "octopus": octopus,
         "generated_at": now.isoformat(timespec="seconds"),
         "site_name": sites[0].get("site_name"),
         "live": live,

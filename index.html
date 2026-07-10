@@ -158,6 +158,17 @@
       </div>
       <div class="sub" style="margin-top:6px;font-size:11.5px">Estimated from 15-minute samples</div>
     </div>
+    <div class="card" style="margin-top:12px" id="octoCard" hidden>
+      <h2>Octopus metered <span id="o_day" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div class="today">
+        <div class="cost">Imported<b id="o_imp">–</b></div>
+        <div class="cost">Import cost<b id="o_cost">–</b></div>
+        <div class="saved">Exported<b id="o_exp">–</b></div>
+        <div class="saved">Export earned<b id="o_earn">–</b></div>
+        <div class="saved">Net<b id="o_net">–</b></div>
+      </div>
+      <div class="sub" style="margin-top:6px;font-size:11.5px" id="o_tariffs">Smart-meter data · actual tariff rates · lags ~1 day</div>
+    </div>
     <div class="card" style="margin-top:12px">
       <h2>Automations</h2>
       <div id="autos"></div>
@@ -283,7 +294,53 @@ function renderCost(hist,genAt){
   el('c_saved').textContent=gbp(Math.max(would-cost,0));
 }
 
+/* ---- Octopus metered data (actual smart-meter kWh × actual rates) ---- */
+function octoDay(side){
+  // group consumption by date, return the most recent complete-ish day
+  const byDay={};
+  for(const c of (side&&side.consumption)||[]){
+    const day=(c.interval_start||'').slice(0,10);
+    (byDay[day]=byDay[day]||[]).push(c);
+  }
+  const days=Object.keys(byDay).sort();
+  if(!days.length) return null;
+  const day=byDay[days[days.length-1]].length>=40?days[days.length-1]:(days[days.length-2]||days[days.length-1]);
+  return {day,rows:byDay[day]||[]};
+}
+function rateFor(rates,t){
+  for(const r of rates||[]){
+    if(r.valid_from<=t && (r.valid_to===null||t<r.valid_to)) return r.value_inc_vat;
+  }
+  return null;
+}
+function octoTotals(side){
+  const d=octoDay(side); if(!d) return null;
+  let kwhTot=0,cost=0;
+  for(const c of d.rows){
+    const r=rateFor(side.rates,c.interval_start);
+    kwhTot+=c.consumption||0;
+    if(r!=null) cost+=(c.consumption||0)*r;
+  }
+  return {day:d.day,kwh:kwhTot,cost};
+}
+function renderOcto(o){
+  const card=el('octoCard');
+  if(!o||o.error||(!o.import&&!o.export)){card.hidden=true;return}
+  card.hidden=false;
+  const imp=o.import?octoTotals(o.import):null;
+  const exp=o.export?octoTotals(o.export):null;
+  el('o_day').textContent='('+((imp&&imp.day)||(exp&&exp.day)||'')+')';
+  el('o_imp').textContent=imp?imp.kwh.toFixed(1)+' kWh':'–';
+  el('o_cost').textContent=imp?gbp(imp.cost):'–';
+  el('o_exp').textContent=exp?exp.kwh.toFixed(1)+' kWh':'–';
+  el('o_earn').textContent=exp?gbp(exp.cost):'–';
+  el('o_net').textContent=(imp||exp)?gbp((imp?imp.cost:0)-(exp?exp.cost:0)):'–';
+  const tf=[o.import&&o.import.tariff,o.export&&o.export.tariff].filter(Boolean).join(' · ');
+  if(tf) el('o_tariffs').textContent=tf+' · smart-meter data lags ~1 day';
+}
+
 function render(d){
+  renderOcto(d.octopus);
   el('title').textContent=d.site_name||'Powerwall';
   el('updated').textContent='Updated '+new Date(d.generated_at).toLocaleString();
   const L=d.live||{};
