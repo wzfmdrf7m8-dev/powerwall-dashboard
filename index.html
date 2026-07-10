@@ -169,6 +169,16 @@
       </div>
       <div class="sub" style="margin-top:6px;font-size:11.5px" id="o_tariffs">Smart-meter data · actual tariff rates · lags ~1 day</div>
     </div>
+    <div class="card" style="margin-top:12px" id="ohmeCard" hidden>
+      <h2>EV charger (Ohme)</h2>
+      <div class="today">
+        <div>Status<b id="ev_status" style="font-size:15px">–</b></div>
+        <div>Power<b id="ev_power">–</b></div>
+        <div>Session energy<b id="ev_energy">–</b></div>
+        <div>Car battery<b id="ev_soc">–</b></div>
+      </div>
+      <div class="sub" style="margin-top:6px;font-size:11.5px">Unofficial Ohme cloud API · read-only</div>
+    </div>
     <div class="card" style="margin-top:12px">
       <h2>Automations</h2>
       <div id="autos"></div>
@@ -339,8 +349,22 @@ function renderOcto(o){
   if(tf) el('o_tariffs').textContent=tf+' · smart-meter data lags ~1 day';
 }
 
+function renderOhme(o){
+  const card=el('ohmeCard');
+  if(!o||o.error){card.hidden=true;return}
+  card.hidden=false;
+  const num=v=>{if(typeof v==='number')return v;if(v&&typeof v==='object'){for(const k of ['watts','watt','value','amount'])if(typeof v[k]==='number')return v[k]}return null};
+  el('ev_status').textContent=(''+(o.status||'–')).replace(/^ChargerStatus\./,'').replace(/_/g,' ');
+  const p=num(o.power);
+  el('ev_power').textContent=p!=null?kw(p):'–';
+  const e=num(o.energy);
+  el('ev_energy').textContent=e!=null?(e/1000).toFixed(1)+' kWh':'–';
+  el('ev_soc').textContent=(typeof o.battery==='number')?o.battery+'%':'–';
+}
+
 function render(d){
   renderOcto(d.octopus);
+  renderOhme(d.ohme);
   el('title').textContent=d.site_name||'Powerwall';
   el('updated').textContent='Updated '+new Date(d.generated_at).toLocaleString();
   const L=d.live||{};

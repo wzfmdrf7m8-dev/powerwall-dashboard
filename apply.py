@@ -125,6 +125,46 @@ def fetch_octopus(key: str, acct: str, now) -> dict:
     return out
 
 
+def _jsonable(v, depth=0):
+    if depth > 3:
+        return str(v)
+    if isinstance(v, (str, int, float, bool)) or v is None:
+        return v
+    if isinstance(v, (list, tuple)):
+        return [_jsonable(x, depth + 1) for x in v[:50]]
+    if isinstance(v, dict):
+        return {str(k): _jsonable(x, depth + 1) for k, x in list(v.items())[:50]}
+    if hasattr(v, "__dict__") and v.__dict__:
+        return {k: _jsonable(x, depth + 1) for k, x in v.__dict__.items() if not k.startswith("_")}
+    return str(v)
+
+
+def fetch_ohme(email: str, password: str) -> dict:
+    """Pull charger state via the unofficial Ohme cloud API (ohme library)."""
+    import asyncio
+    from ohme import OhmeApiClient
+
+    async def go():
+        c = OhmeApiClient(email, password)
+        await c.async_login()
+        for meth in ("async_update_device_info", "async_get_charge_session", "async_get_advanced_settings"):
+            fn = getattr(c, meth, None)
+            if fn:
+                try:
+                    await fn()
+                except Exception:
+                    pass
+        out = {}
+        for k in ("status", "power", "battery", "energy", "target_soc", "target_time",
+                  "max_charge", "available", "serial", "ct_amps", "slots", "device_info"):
+            v = getattr(c, k, None)
+            if v is not None:
+                out[k] = _jsonable(v)
+        return out
+
+    return asyncio.run(go())
+
+
 def main():
     tokens = get_tokens()
     tok = tokens["access_token"]
@@ -239,8 +279,18 @@ def main():
         except Exception as e:
             octopus = {"error": str(e)[:200]}
 
+    # ----- Ohme EV charger (optional, unofficial API) -----
+    ohme = None
+    oe, op = os.environ.get("OHME_EMAIL"), os.environ.get("OHME_PASSWORD")
+    if oe and op:
+        try:
+            ohme = fetch_ohme(oe, op)
+        except Exception as e:
+            ohme = {"error": str(e)[:200]}
+
     bundle = {
         "octopus": octopus,
+        "ohme": ohme,
         "generated_at": now.isoformat(timespec="seconds"),
         "site_name": sites[0].get("site_name"),
         "live": live,
