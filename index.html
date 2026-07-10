@@ -6,54 +6,62 @@
 <title>Powerwall Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
-  :root{--bg:#0a0e14;--card:rgba(22,27,35,.75);--edge:rgba(255,255,255,.07);--txt:#e8ecf2;--dim:#8b95a5;
-    --green:#3ecf8e;--amber:#ffb627;--blue:#4ea1f7;--red:#ff5c5c;--purple:#a78bfa}
+  :root{--bg:#070a12;--card:rgba(20,26,40,.72);--edge:rgba(255,255,255,.09);--txt:#f2f5fa;--dim:#93a0b8;
+    --mint:#00e5a0;--sun:#ffd60a;--cyan:#4cc9f0;--pink:#ff4d6d;--violet:#b388ff}
   *{box-sizing:border-box;margin:0}
   body{color:var(--txt);font:15px/1.5 -apple-system,'Segoe UI',Roboto,sans-serif;padding:24px;max-width:1150px;margin:auto;
-    background:var(--bg);background-image:radial-gradient(1200px 600px at 80% -10%,rgba(62,207,142,.10),transparent),
-    radial-gradient(900px 500px at 0% 110%,rgba(78,161,247,.10),transparent);min-height:100vh}
+    background:var(--bg);
+    background-image:
+      radial-gradient(1000px 500px at 85% -10%,rgba(0,229,160,.16),transparent 60%),
+      radial-gradient(800px 500px at -10% 20%,rgba(76,201,240,.14),transparent 60%),
+      radial-gradient(900px 600px at 50% 120%,rgba(179,136,255,.12),transparent 60%);
+    background-attachment:fixed;min-height:100vh}
   h1{font-size:22px;letter-spacing:-.02em}
   .sub{color:var(--dim);font-size:13px}
   header{display:flex;align-items:center;gap:16px;margin-bottom:22px;flex-wrap:wrap}
   header .spacer{flex:1}
-  .card{background:var(--card);backdrop-filter:blur(8px);border:1px solid var(--edge);border-radius:16px;padding:16px;
-    box-shadow:0 8px 30px rgba(0,0,0,.35)}
-  .layout{display:grid;grid-template-columns:1.2fr 1fr;gap:16px;margin-bottom:16px}
+  .card{background:var(--card);backdrop-filter:blur(10px);border:1px solid var(--edge);border-radius:18px;padding:16px;
+    box-shadow:0 10px 40px rgba(0,0,0,.45)}
+  .layout{display:grid;grid-template-columns:1.25fr 1fr;gap:16px;margin-bottom:16px}
   @media(max-width:900px){.layout{grid-template-columns:1fr}}
   .statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
-  .stat .lbl{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
-  .stat .val{font-size:24px;font-weight:650;margin-top:2px;font-variant-numeric:tabular-nums}
+  .stat .lbl{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.09em}
+  .stat .val{font-size:25px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
   .stat .flow{font-size:12px;color:var(--dim)}
   .stat{position:relative;overflow:hidden}
-  .stat::after{content:'';position:absolute;inset:0;border-radius:16px;pointer-events:none;
-    background:linear-gradient(120deg,transparent 30%,rgba(255,255,255,.045) 45%,transparent 60%);
-    transform:translateX(-100%);animation:sheen 6s infinite}
+  .stat::after{content:'';position:absolute;inset:0;border-radius:18px;pointer-events:none;
+    background:linear-gradient(120deg,transparent 30%,rgba(255,255,255,.06) 45%,transparent 60%);
+    transform:translateX(-100%);animation:sheen 5s infinite}
   @keyframes sheen{20%{transform:translateX(100%)}100%{transform:translateX(100%)}}
-  .chartbox h2,.card h2{font-size:13px;color:var(--dim);margin-bottom:10px;text-transform:uppercase;letter-spacing:.08em}
+  .chartbox h2,.card h2{font-size:13px;color:var(--dim);margin-bottom:10px;text-transform:uppercase;letter-spacing:.09em}
   .chartbox{margin-bottom:16px}
-  /* SOC ring */
-  .ring{width:74px;height:74px}
-  .ring text{fill:var(--txt);font-weight:700}
-  /* flow svg */
+  .ring{width:76px;height:76px}
   #flow{width:100%;height:auto;display:block}
-  .node-label{fill:var(--txt);font-size:14px;font-weight:650;text-anchor:middle}
-  .node-val{fill:var(--dim);font-size:12.5px;text-anchor:middle;font-variant-numeric:tabular-nums}
-  .wire{fill:none;stroke:rgba(255,255,255,.08);stroke-width:2}
-  .wire.active{stroke-width:2.5}
+  .node-label{fill:var(--txt);font-size:14px;font-weight:700;text-anchor:middle;letter-spacing:.02em}
+  .node-val{fill:var(--dim);font-size:13px;text-anchor:middle;font-variant-numeric:tabular-nums}
+  .wire{fill:none;stroke:rgba(255,255,255,.07);stroke-width:2.5;stroke-linecap:round}
+  .wire.active{stroke-width:3.5;stroke-dasharray:6 14;animation:march 1.1s linear infinite}
+  @keyframes march{to{stroke-dashoffset:-20}}
+  .nodePulse{animation:pulse 3s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
   #overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:10}
-  #overlay .box{background:var(--card);border:1px solid var(--edge);padding:34px;border-radius:18px;width:330px;text-align:center}
-  input,select,button{font:inherit;border-radius:10px;border:1px solid #2a3240;background:#0e1116;color:var(--txt);padding:8px 12px}
-  button{background:var(--green);color:#07100b;border:0;font-weight:650;cursor:pointer}
-  button:hover{filter:brightness(1.1)}
-  button.sec{background:#2a3240;color:var(--txt)}
+  #overlay .box{background:var(--card);border:1px solid var(--edge);padding:34px;border-radius:20px;width:330px;text-align:center;
+    box-shadow:0 0 80px rgba(0,229,160,.15)}
+  input,select,button{font:inherit;border-radius:10px;border:1px solid #2a3550;background:#0b1020;color:var(--txt);padding:8px 12px}
+  button{background:linear-gradient(90deg,var(--mint),var(--cyan));color:#04120c;border:0;font-weight:700;cursor:pointer}
+  button:hover{filter:brightness(1.12)}
+  button.sec{background:#242e45;color:var(--txt)}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
-  .err{color:var(--red);font-size:13px;margin-top:8px;min-height:18px}
-  .ok{color:var(--green)}
-  .pill{display:inline-block;background:#232b36;border:1px solid var(--edge);border-radius:99px;padding:3px 12px;font-size:12px;margin:2px}
+  .err{color:var(--pink);font-size:13px;margin-top:8px;min-height:18px}
+  .ok{color:var(--mint)}
+  .pill{display:inline-block;background:#1c2438;border:1px solid var(--edge);border-radius:99px;padding:3px 12px;font-size:12px;margin:2px}
   details summary{cursor:pointer;color:var(--dim)}
-  .today{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
-  .today div{font-size:13px;color:var(--dim)}
-  .today b{color:var(--txt);font-size:16px;display:block;font-variant-numeric:tabular-nums}
+  .today{display:flex;gap:18px;flex-wrap:wrap;margin-top:8px}
+  .today div{font-size:12.5px;color:var(--dim)}
+  .today b{font-size:17px;display:block;font-variant-numeric:tabular-nums;
+    background:linear-gradient(90deg,var(--mint),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .cost b{background:linear-gradient(90deg,var(--sun),var(--pink));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .saved b{background:linear-gradient(90deg,var(--mint),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
 </style>
 </head>
 <body>
@@ -65,13 +73,15 @@
 </div></div>
 
 <header>
-  <svg class="ring" viewBox="0 0 74 74">
-    <circle cx="37" cy="37" r="31" fill="none" stroke="#232b36" stroke-width="7"/>
-    <circle id="socArc" cx="37" cy="37" r="31" fill="none" stroke="url(#socGrad)" stroke-width="7"
-      stroke-linecap="round" stroke-dasharray="194.8" stroke-dashoffset="194.8" transform="rotate(-90 37 37)"
-      style="transition:stroke-dashoffset 1.2s ease"/>
-    <defs><linearGradient id="socGrad"><stop offset="0%" stop-color="#3ecf8e"/><stop offset="100%" stop-color="#4ea1f7"/></linearGradient></defs>
-    <text id="socTxt" x="37" y="42" text-anchor="middle" font-size="16">–</text>
+  <svg class="ring" viewBox="0 0 76 76">
+    <defs>
+      <linearGradient id="socGrad"><stop offset="0%" stop-color="#00e5a0"/><stop offset="100%" stop-color="#4cc9f0"/></linearGradient>
+    </defs>
+    <circle cx="38" cy="38" r="31" fill="none" stroke="#1a2338" stroke-width="8"/>
+    <circle id="socArc" cx="38" cy="38" r="31" fill="none" stroke="url(#socGrad)" stroke-width="8"
+      stroke-linecap="round" stroke-dasharray="194.8" stroke-dashoffset="194.8" transform="rotate(-90 38 38)"
+      style="transition:stroke-dashoffset 1.2s ease;filter:drop-shadow(0 0 6px rgba(0,229,160,.7))"/>
+    <text id="socTxt" x="38" y="43" text-anchor="middle" font-size="16" font-weight="700" fill="#f2f5fa">–</text>
   </svg>
   <div><h1 id="title">Powerwall</h1><div class="sub" id="updated">locked</div></div>
   <div class="spacer"></div>
@@ -82,7 +92,15 @@
   <div class="card">
     <h2>Live energy flow</h2>
     <svg id="flow" viewBox="0 0 620 430">
-      <!-- wires -->
+      <defs>
+        <linearGradient id="wSun" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ffd60a"/><stop offset="100%" stop-color="#ff9e00"/></linearGradient>
+        <linearGradient id="wMint" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#00e5a0"/><stop offset="100%" stop-color="#4cc9f0"/></linearGradient>
+        <linearGradient id="wPink" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#ff4d6d"/><stop offset="100%" stop-color="#ff8fa3"/></linearGradient>
+        <radialGradient id="gSun"><stop offset="0%" stop-color="rgba(255,214,10,.35)"/><stop offset="100%" stop-color="rgba(255,214,10,0)"/></radialGradient>
+        <radialGradient id="gGrid"><stop offset="0%" stop-color="rgba(255,77,109,.30)"/><stop offset="100%" stop-color="rgba(255,77,109,0)"/></radialGradient>
+        <radialGradient id="gHome"><stop offset="0%" stop-color="rgba(76,201,240,.32)"/><stop offset="100%" stop-color="rgba(76,201,240,0)"/></radialGradient>
+        <radialGradient id="gBatt"><stop offset="0%" stop-color="rgba(0,229,160,.32)"/><stop offset="100%" stop-color="rgba(0,229,160,0)"/></radialGradient>
+      </defs>
       <path id="p_sh" class="wire" d="M 340 92 Q 480 130 520 268"/>
       <path id="p_sb" class="wire" d="M 310 106 L 310 300"/>
       <path id="p_sg" class="wire" d="M 280 92 Q 140 130 100 268"/>
@@ -90,32 +108,32 @@
       <path id="p_gb" class="wire" d="M 122 320 Q 200 356 272 330"/>
       <path id="p_bh" class="wire" d="M 348 330 Q 420 356 498 320"/>
       <g id="dots"></g>
-      <!-- solar -->
       <g transform="translate(310,60)">
-        <circle r="34" fill="rgba(255,182,39,.12)" stroke="#ffb627" stroke-width="2"/>
-        <text y="7" text-anchor="middle" font-size="26">&#9728;&#65039;</text>
+        <circle r="52" fill="url(#gSun)" class="nodePulse"/>
+        <circle r="34" fill="rgba(255,214,10,.10)" stroke="url(#wSun)" stroke-width="2.5"/>
+        <text y="8" text-anchor="middle" font-size="27">&#9728;&#65039;</text>
         <text class="node-label" y="-44">Solar</text>
         <text id="v_solar" class="node-val" y="58">–</text>
       </g>
-      <!-- grid -->
       <g transform="translate(96,300)">
-        <circle r="34" fill="rgba(255,92,92,.10)" stroke="#ff5c5c" stroke-width="2"/>
+        <circle r="52" fill="url(#gGrid)" class="nodePulse"/>
+        <circle r="34" fill="rgba(255,77,109,.10)" stroke="url(#wPink)" stroke-width="2.5"/>
         <text y="8" text-anchor="middle" font-size="24">&#128509;</text>
         <text class="node-label" y="-44">Grid</text>
         <text id="v_grid" class="node-val" y="58">–</text>
       </g>
-      <!-- home -->
       <g transform="translate(524,300)">
-        <circle r="34" fill="rgba(78,161,247,.12)" stroke="#4ea1f7" stroke-width="2"/>
+        <circle r="52" fill="url(#gHome)" class="nodePulse"/>
+        <circle r="34" fill="rgba(76,201,240,.12)" stroke="#4cc9f0" stroke-width="2.5"/>
         <text y="8" text-anchor="middle" font-size="24">&#127968;</text>
         <text class="node-label" y="-44">Home</text>
         <text id="v_load" class="node-val" y="58">–</text>
       </g>
-      <!-- battery -->
       <g transform="translate(310,340)">
-        <rect x="-30" y="-26" width="60" height="52" rx="10" fill="rgba(62,207,142,.10)" stroke="#3ecf8e" stroke-width="2"/>
-        <rect id="battFill" x="-26" y="22" width="52" height="0" rx="6" fill="rgba(62,207,142,.45)"/>
-        <text id="battPct" y="6" text-anchor="middle" font-size="14" font-weight="700" fill="#e8ecf2">–</text>
+        <circle r="54" fill="url(#gBatt)" class="nodePulse"/>
+        <rect x="-30" y="-26" width="60" height="52" rx="10" fill="rgba(0,229,160,.08)" stroke="url(#wMint)" stroke-width="2.5"/>
+        <rect id="battFill" x="-26" y="22" width="52" height="0" rx="6" fill="rgba(0,229,160,.5)"/>
+        <text id="battPct" y="6" text-anchor="middle" font-size="14" font-weight="700" fill="#f2f5fa">–</text>
         <text class="node-label" y="-38">Powerwall</text>
         <text id="v_batt" class="node-val" y="46">–</text>
       </g>
@@ -123,19 +141,29 @@
   </div>
   <div>
     <div class="statgrid">
-      <div class="card stat"><div class="lbl">Solar</div><div class="val" style="color:var(--amber)" id="solar">–</div></div>
-      <div class="card stat"><div class="lbl">Home</div><div class="val" style="color:var(--blue)" id="load">–</div></div>
-      <div class="card stat"><div class="lbl">Grid</div><div class="val" id="grid">–</div><div class="flow" id="gridflow"></div></div>
-      <div class="card stat"><div class="lbl">Battery</div><div class="val" style="color:var(--green)" id="batt">–</div><div class="flow" id="battflow"></div></div>
+      <div class="card stat"><div class="lbl">Solar</div><div class="val" style="color:var(--sun)" id="solar">–</div></div>
+      <div class="card stat"><div class="lbl">Home</div><div class="val" style="color:var(--cyan)" id="load">–</div></div>
+      <div class="card stat"><div class="lbl">Grid</div><div class="val" style="color:var(--pink)" id="grid">–</div><div class="flow" id="gridflow"></div></div>
+      <div class="card stat"><div class="lbl">Battery</div><div class="val" style="color:var(--mint)" id="batt">–</div><div class="flow" id="battflow"></div></div>
     </div>
     <div class="card">
       <h2>Today</h2>
       <div class="today">
-        <div>Solar generated<b id="t_solar">–</b></div>
-        <div>Home used<b id="t_home">–</b></div>
-        <div>Grid imported<b id="t_imp">–</b></div>
-        <div>Grid exported<b id="t_exp">–</b></div>
+        <div>Solar<b id="t_solar">–</b></div>
+        <div>Home<b id="t_home">–</b></div>
+        <div>Imported<b id="t_imp">–</b></div>
+        <div>Exported<b id="t_exp">–</b></div>
       </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Cost today <span style="text-transform:none;letter-spacing:0">(off-peak 5.9p · peak 32p)</span></h2>
+      <div class="today">
+        <div class="cost">Grid cost<b id="c_cost">–</b></div>
+        <div class="cost">Off-peak / peak<b id="c_split" style="font-size:14px">–</b></div>
+        <div class="saved">Without solar+battery<b id="c_would">–</b></div>
+        <div class="saved">Saved<b id="c_saved">–</b></div>
+      </div>
+      <div class="sub" style="margin-top:6px;font-size:11.5px">Estimated from 15-minute samples</div>
     </div>
     <div class="card" style="margin-top:12px">
       <h2>Automations</h2>
@@ -166,6 +194,7 @@
 
 <script>
 const REPO='wzfmdrf7m8-dev/powerwall-dashboard', WF='poll.yml', SVGNS='http://www.w3.org/2000/svg';
+const TARIFF={offpeak:5.9, peak:32, start:'23:30', end:'05:30'};  // pence per kWh
 let PASS=null,histChart,dayChart;
 
 async function deriveKey(pass,salt){
@@ -183,18 +212,25 @@ async function loadData(pass){
 const el=id=>document.getElementById(id), val=id=>el(id).value;
 const kw=w=>w==null?'–':(Math.abs(w)>=950?(w/1000).toFixed(1)+' kW':Math.round(w)+' W');
 const kwh=x=>x==null?'–':(x/1000).toFixed(1)+' kWh';
+const gbp=p=>p==null?'–':(p>=100?'£'+(p/100).toFixed(2):p.toFixed(1)+'p');
+
+function isOffpeak(hhmm){ return hhmm>=TARIFF.start || hhmm<TARIFF.end }
+function rateAt(hhmm){ return isOffpeak(hhmm)?TARIFF.offpeak:TARIFF.peak }
 
 /* ---- animated flow dots ---- */
 function setDots(pathId,watts,color,reverse){
   const w=Math.abs(watts||0), path=el(pathId);
   path.classList.toggle('active',w>50);
+  path.style.stroke=w>50?color:'';
+  path.style.filter=w>50?`drop-shadow(0 0 4px ${color})`:'';
+  path.style.opacity=w>50?'0.55':'';
   if(w<=50) return;
-  const n=Math.min(4,1+Math.floor(w/1500));            // dot count by power
-  const dur=Math.max(1.2,4.5-3*Math.min(1,w/8000));    // faster when stronger
+  const n=Math.min(5,1+Math.floor(w/1200));
+  const dur=Math.max(1.0,4.2-3*Math.min(1,w/8000));
   for(let i=0;i<n;i++){
     const c=document.createElementNS(SVGNS,'circle');
-    c.setAttribute('r',w>3000?5:4); c.setAttribute('fill',color);
-    c.setAttribute('opacity','.95'); c.style.filter=`drop-shadow(0 0 6px ${color})`;
+    c.setAttribute('r',w>3000?5.5:4.5); c.setAttribute('fill',color);
+    c.style.filter=`drop-shadow(0 0 8px ${color}) drop-shadow(0 0 16px ${color})`;
     const m=document.createElementNS(SVGNS,'animateMotion');
     m.setAttribute('dur',dur+'s'); m.setAttribute('repeatCount','indefinite');
     m.setAttribute('begin',(-i*dur/n)+'s');
@@ -209,7 +245,6 @@ function renderFlow(L){
   const solar=L.solar_power||0, load=L.load_power||0, grid=L.grid_power||0, batt=L.battery_power||0;
   const gridImp=Math.max(grid,0), gridExp=Math.max(-grid,0);
   const battDis=Math.max(batt,0), battChg=Math.max(-batt,0);
-  // decompose (approximate, good enough for viz)
   const solarToBatt=Math.min(solar,battChg);
   const solarToHome=Math.min(solar-solarToBatt,load);
   const solarToGrid=Math.min(Math.max(solar-solarToBatt-solarToHome,0),gridExp);
@@ -217,13 +252,13 @@ function renderFlow(L){
   const battToGrid=Math.max(battDis-battToHome,0);
   const gridToBatt=Math.max(battChg-solarToBatt,0);
   const gridToHome=Math.max(gridImp-gridToBatt,0);
-  setDots('p_sh',solarToHome,'#ffb627');
-  setDots('p_sb',solarToBatt,'#ffb627');
-  setDots('p_sg',solarToGrid,'#3ecf8e');
-  setDots('p_gh',gridToHome,'#ff5c5c');
-  setDots('p_gb',gridToBatt,'#ff5c5c');
-  setDots('p_bh',battToHome,'#3ecf8e');
-  if(battToGrid>50) setDots('p_gb',battToGrid,'#3ecf8e',true);
+  setDots('p_sh',solarToHome,'#ffd60a');
+  setDots('p_sb',solarToBatt,'#ffd60a');
+  setDots('p_sg',solarToGrid,'#00e5a0');
+  setDots('p_gh',gridToHome,'#ff4d6d');
+  setDots('p_gb',gridToBatt,'#ff4d6d');
+  setDots('p_bh',battToHome,'#00e5a0');
+  if(battToGrid>50) setDots('p_gb',battToGrid,'#00e5a0',true);
   el('v_solar').textContent=kw(solar);
   el('v_grid').textContent=(grid<-50?'← ':grid>50?'→ ':'')+kw(Math.abs(grid));
   el('v_load').textContent=kw(load);
@@ -234,6 +269,25 @@ function renderFlow(L){
   el('battFill').setAttribute('y',22-h); el('battFill').setAttribute('height',h);
   el('socArc').style.strokeDashoffset=194.8*(1-soc/100);
   el('socTxt').textContent=soc.toFixed(0)+'%';
+}
+
+/* ---- cost estimate from 15-min history samples ---- */
+function renderCost(hist,genAt){
+  const today=(genAt||'').slice(0,10);
+  let cost=0, off=0, peak=0, would=0;
+  for(const p of hist){
+    if(!p.t || p.t.slice(0,10)!==today) continue;
+    const hhmm=p.t.slice(11,16), r=rateAt(hhmm);
+    const impKwh=Math.max(p.grid||0,0)*0.25/1000;
+    const loadKwh=Math.max(p.load||0,0)*0.25/1000;
+    const c=impKwh*r;
+    cost+=c; if(isOffpeak(hhmm)) off+=c; else peak+=c;
+    would+=loadKwh*r;
+  }
+  el('c_cost').textContent=gbp(cost);
+  el('c_split').textContent=gbp(off)+' / '+gbp(peak);
+  el('c_would').textContent=gbp(would);
+  el('c_saved').textContent=gbp(Math.max(would-cost,0));
 }
 
 function render(d){
@@ -263,23 +317,25 @@ function render(d){
   el('t_imp').textContent=kwh(t.grid_energy_imported);
   el('t_exp').textContent=kwh((t.grid_energy_exported_from_solar||0)+(t.grid_energy_exported_from_battery||0));
 
+  renderCost(d.history||[], d.generated_at);
+
   const h=d.history||[];
   const labels=h.map(p=>p.t.slice(5,16).replace('T',' '));
   histChart&&histChart.destroy();
   histChart=new Chart(el('histChart'),{type:'line',data:{labels,datasets:[
-    {label:'Battery %',data:h.map(p=>p.soc),borderColor:'#3ecf8e',backgroundColor:'rgba(62,207,142,.12)',fill:true,pointRadius:0,yAxisID:'y1',tension:.35},
-    {label:'Solar kW',data:h.map(p=>p.solar/1000),borderColor:'#ffb627',pointRadius:0,tension:.35},
-    {label:'Home kW',data:h.map(p=>p.load/1000),borderColor:'#4ea1f7',pointRadius:0,tension:.35},
-    {label:'Grid kW',data:h.map(p=>p.grid/1000),borderColor:'#ff5c5c',pointRadius:0,tension:.35}]},
+    {label:'Battery %',data:h.map(p=>p.soc),borderColor:'#00e5a0',backgroundColor:'rgba(0,229,160,.14)',fill:true,pointRadius:0,yAxisID:'y1',tension:.35},
+    {label:'Solar kW',data:h.map(p=>p.solar/1000),borderColor:'#ffd60a',pointRadius:0,tension:.35},
+    {label:'Home kW',data:h.map(p=>p.load/1000),borderColor:'#4cc9f0',pointRadius:0,tension:.35},
+    {label:'Grid kW',data:h.map(p=>p.grid/1000),borderColor:'#ff4d6d',pointRadius:0,tension:.35}]},
     options:{scales:{y:{title:{display:true,text:'kW'},grid:{color:'rgba(255,255,255,.05)'}},
       y1:{position:'right',min:0,max:100,grid:{drawOnChartArea:false}},x:{ticks:{maxTicksLimit:10},grid:{display:false}}},
-      plugins:{legend:{labels:{color:'#8b95a5'}}}}});
+      plugins:{legend:{labels:{color:'#93a0b8'}}}}});
   dayChart&&dayChart.destroy();
   dayChart=new Chart(el('dayChart'),{type:'bar',data:{labels:e.map(r=>r.timestamp.slice(5,10)),datasets:[
-    {label:'Solar',data:e.map(r=>(r.solar_energy_exported||0)/1000),backgroundColor:'#ffb627',borderRadius:4},
-    {label:'Home',data:e.map(r=>home(r)/1000),backgroundColor:'#4ea1f7',borderRadius:4},
-    {label:'Grid import',data:e.map(r=>(r.grid_energy_imported||0)/1000),backgroundColor:'#ff5c5c',borderRadius:4}]},
-    options:{scales:{x:{grid:{display:false}},y:{grid:{color:'rgba(255,255,255,.05)'}}},plugins:{legend:{labels:{color:'#8b95a5'}}}}});
+    {label:'Solar',data:e.map(r=>(r.solar_energy_exported||0)/1000),backgroundColor:'#ffd60a',borderRadius:5},
+    {label:'Home',data:e.map(r=>home(r)/1000),backgroundColor:'#4cc9f0',borderRadius:5},
+    {label:'Grid import',data:e.map(r=>(r.grid_energy_imported||0)/1000),backgroundColor:'#ff4d6d',borderRadius:5}]},
+    options:{scales:{x:{grid:{display:false}},y:{grid:{color:'rgba(255,255,255,.05)'}}},plugins:{legend:{labels:{color:'#93a0b8'}}}}});
 }
 
 async function unlock(){
