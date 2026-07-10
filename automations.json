@@ -2,9 +2,9 @@
   "enabled": true,
   "timezone": "Europe/London",
   "cheap_window": {
-    "enabled": false,
-    "start": "00:30",
-    "end": "04:30",
+    "enabled": true,
+    "start": "23:30",
+    "end": "05:30",
     "reserve": 100,
     "mode": "self_consumption",
     "allow_grid_charging": true
