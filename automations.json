@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "timezone": "Europe/London",
+  "cheap_window": {
+    "enabled": false,
+    "start": "00:30",
+    "end": "04:30",
+    "reserve": 100,
+    "mode": "self_consumption",
+    "allow_grid_charging": true
+  },
+  "day": {
+    "reserve": 20,
+    "mode": "self_consumption",
+    "allow_grid_charging": false
+  },
+  "storm_watch": true
+}

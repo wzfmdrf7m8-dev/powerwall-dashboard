@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Powerwall Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#0e1116;--card:#161b23;--txt:#e6e9ee;--dim:#8b95a5;--acc:#3ecf8e;--warn:#f0b429;--red:#e05252;--blue:#4ea1f7}
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,'Segoe UI',Roboto,sans-serif;padding:20px;max-width:1100px;margin:auto}
+  h1{font-size:20px;margin-bottom:4px} .sub{color:var(--dim);font-size:13px;margin-bottom:20px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+  .card{background:var(--card);border-radius:12px;padding:14px 16px}
+  .card .lbl{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  .card .val{font-size:26px;font-weight:600;margin-top:2px}
+  .card .unit{font-size:14px;color:var(--dim)}
+  .chartbox{background:var(--card);border-radius:12px;padding:16px;margin-bottom:20px}
+  .chartbox h2{font-size:14px;color:var(--dim);margin-bottom:10px}
+  #overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:10}
+  #overlay .box{background:var(--card);padding:32px;border-radius:14px;width:320px;text-align:center}
+  input,select,button{font:inherit;border-radius:8px;border:1px solid #2a3240;background:#0e1116;color:var(--txt);padding:8px 12px}
+  button{background:var(--acc);color:#0b0f14;border:0;font-weight:600;cursor:pointer}
+  button.sec{background:#2a3240;color:var(--txt)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  .err{color:var(--red);font-size:13px;margin-top:8px;min-height:18px}
+  .ok{color:var(--acc)} .pill{display:inline-block;background:#2a3240;border-radius:99px;padding:2px 10px;font-size:12px;margin:2px}
+  details{margin-bottom:20px} summary{cursor:pointer;color:var(--dim)}
+  .flow{font-size:13px;color:var(--dim)}
+</style>
+</head>
+<body>
+<div id="overlay"><div class="box">
+  <h1 style="margin-bottom:12px">&#9889; Powerwall</h1>
+  <input id="pw" type="password" placeholder="Dashboard password" style="width:100%" autofocus>
+  <div class="row" style="justify-content:center"><button onclick="unlock()">Unlock</button></div>
+  <div class="err" id="pwerr"></div>
+</div></div>
+
+<h1 id="title">Powerwall Dashboard</h1>
+<div class="sub" id="updated"></div>
+
+<div class="grid">
+  <div class="card"><div class="lbl">Battery</div><div class="val" id="soc">–</div></div>
+  <div class="card"><div class="lbl">Solar</div><div class="val" id="solar">–</div></div>
+  <div class="card"><div class="lbl">Home</div><div class="val" id="load">–</div></div>
+  <div class="card"><div class="lbl">Grid</div><div class="val" id="grid">–</div><div class="flow" id="gridflow"></div></div>
+  <div class="card"><div class="lbl">Battery Flow</div><div class="val" id="batt">–</div><div class="flow" id="battflow"></div></div>
+  <div class="card"><div class="lbl">Reserve / Mode</div><div class="val" id="reserve" style="font-size:18px">–</div><div class="flow" id="storm"></div></div>
+</div>
+
+<div class="chartbox"><h2>Battery &amp; power — last 7 days</h2><canvas id="histChart" height="90"></canvas></div>
+<div class="chartbox"><h2>Daily energy — last 30 days (kWh)</h2><canvas id="dayChart" height="90"></canvas></div>
+
+<div class="chartbox">
+  <h2>Automations</h2>
+  <div id="autos"></div>
+  <div id="lastlog" class="flow" style="margin-top:6px"></div>
+</div>
+
+<details class="chartbox">
+  <summary>Controls (requires GitHub token)</summary>
+  <div class="row"><input id="pat" type="password" placeholder="Fine-grained GitHub token (stored in this browser only)" style="flex:1"><button class="sec" onclick="savePat()">Save</button></div>
+  <div class="row">
+    <input id="rsv" type="number" min="0" max="100" placeholder="%" style="width:80px"><button onclick="cmd('reserve',val('rsv'))">Set reserve</button>
+    <select id="mode"><option value="self_consumption">self_consumption</option><option value="autonomous">autonomous (time-based)</option></select>
+    <button onclick="cmd('mode',val('mode'))">Set mode</button>
+  </div>
+  <div class="row">
+    <button onclick="cmd('storm','on')">Storm on</button><button class="sec" onclick="cmd('storm','off')">Storm off</button>
+    <button onclick="cmd('grid_charging','on')">Allow grid charging</button><button class="sec" onclick="cmd('grid_charging','off')">Block grid charging</button>
+    <button class="sec" onclick="cmd('poll','')">Refresh now</button>
+  </div>
+  <div class="err" id="cmderr"></div>
+</details>
+
+<script>
+const REPO='wzfmdrf7m8-dev/powerwall-dashboard', WF='poll.yml';
+let PASS=null;
+
+async function deriveKey(pass,salt){
+  const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:200000,hash:'SHA-256'},km,{name:'AES-CBC',length:256},false,['decrypt']);
+}
+async function loadData(pass){
+  const res=await fetch('data/dashboard.enc?_='+Date.now(),{cache:'no-store'});
+  if(!res.ok) throw new Error('no data yet — run the poll workflow');
+  const raw=Uint8Array.from(atob((await res.text()).trim()),c=>c.charCodeAt(0));
+  const key=await deriveKey(pass,raw.slice(0,16));
+  const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+function kw(w){return w==null?'–':(Math.abs(w)>=1000?(w/1000).toFixed(1)+' kW':Math.round(w)+' W')}
+function el(id){return document.getElementById(id)}
+function val(id){return el(id).value}
+
+let histChart,dayChart;
+function render(d){
+  el('title').textContent=(d.site_name||'Powerwall')+' Dashboard';
+  el('updated').textContent='Updated '+new Date(d.generated_at).toLocaleString();
+  const L=d.live||{};
+  el('soc').textContent=L.percentage_charged!=null?L.percentage_charged.toFixed(0)+'%':'–';
+  el('solar').textContent=kw(L.solar_power);
+  el('load').textContent=kw(L.load_power);
+  el('grid').textContent=kw(Math.abs(L.grid_power));
+  el('gridflow').textContent=L.grid_power>50?'importing':(L.grid_power<-50?'exporting':'idle');
+  el('batt').textContent=kw(Math.abs(L.battery_power));
+  el('battflow').textContent=L.battery_power>50?'discharging':(L.battery_power<-50?'charging':'idle');
+  const si=d.site_info||{};
+  el('reserve').textContent=(si.backup_reserve_percent??'–')+'% · '+(si.default_real_mode||'–');
+  el('storm').textContent='storm watch: '+((si.user_settings||{}).storm_mode_enabled?'on':'off');
+  const a=d.automations||{};
+  let html='<span class="pill">'+(a.enabled?'enabled':'disabled')+'</span>';
+  if(a.cheap_window) html+='<span class="pill">cheap window '+(a.cheap_window.enabled?a.cheap_window.start+'–'+a.cheap_window.end+' → '+a.cheap_window.reserve+'%':'off')+'</span>';
+  if(a.day) html+='<span class="pill">day: '+a.day.reserve+'% '+a.day.mode+'</span>';
+  html+='<span class="pill">storm watch: '+(a.storm_watch?'on':'off')+'</span>';
+  el('autos').innerHTML=html;
+  el('lastlog').textContent=(d.log&&d.log.length)?('Last run: '+d.log.join('; ')):'Last run: no changes';
+
+  const h=d.history||[];
+  const labels=h.map(p=>p.t.slice(5,16).replace('T',' '));
+  histChart&&histChart.destroy();
+  histChart=new Chart(el('histChart'),{type:'line',data:{labels,datasets:[
+    {label:'Battery %',data:h.map(p=>p.soc),borderColor:'#3ecf8e',pointRadius:0,yAxisID:'y1',tension:.3},
+    {label:'Solar kW',data:h.map(p=>p.solar/1000),borderColor:'#f0b429',pointRadius:0,tension:.3},
+    {label:'Home kW',data:h.map(p=>p.load/1000),borderColor:'#4ea1f7',pointRadius:0,tension:.3},
+    {label:'Grid kW',data:h.map(p=>p.grid/1000),borderColor:'#e05252',pointRadius:0,tension:.3}]},
+    options:{scales:{y:{title:{display:true,text:'kW'}},y1:{position:'right',min:0,max:100,grid:{drawOnChartArea:false}},x:{ticks:{maxTicksLimit:10}}},plugins:{legend:{labels:{color:'#8b95a5'}}}}});
+  const e=(d.energy_daily||[]).filter(r=>r.timestamp);
+  dayChart&&dayChart.destroy();
+  dayChart=new Chart(el('dayChart'),{type:'bar',data:{labels:e.map(r=>r.timestamp.slice(5,10)),datasets:[
+    {label:'Solar',data:e.map(r=>(r.solar_energy_exported||0)/1000),backgroundColor:'#f0b429'},
+    {label:'Home',data:e.map(r=>((r.consumer_energy_imported_from_grid||0)+(r.consumer_energy_imported_from_solar||0)+(r.consumer_energy_imported_from_battery||0))/1000),backgroundColor:'#4ea1f7'},
+    {label:'Grid import',data:e.map(r=>(r.grid_energy_imported||0)/1000),backgroundColor:'#e05252'}]},
+    options:{plugins:{legend:{labels:{color:'#8b95a5'}}}}});
+}
+
+async function unlock(){
+  try{
+    const p=val('pw');
+    render(await loadData(p));
+    PASS=p; el('overlay').style.display='none';
+    setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},5*60*1000);
+  }catch(e){el('pwerr').textContent=e.name==='OperationError'?'Wrong password':e.message}
+}
+el('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
+if(localStorage.getItem('pw_pat')) window.addEventListener('load',()=>{el('pat').value=localStorage.getItem('pw_pat')});
+function savePat(){localStorage.setItem('pw_pat',val('pat'));el('cmderr').innerHTML='<span class="ok">Token saved in this browser.</span>'}
+async function cmd(command,value){
+  const pat=localStorage.getItem('pw_pat')||val('pat');
+  if(!pat){el('cmderr').textContent='Add a GitHub token first (repo Actions write access).';return}
+  el('cmderr').textContent='Sending…';
+  const r=await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/${WF}/dispatches`,{
+    method:'POST',headers:{'Authorization':'Bearer '+pat,'Accept':'application/vnd.github+json'},
+    body:JSON.stringify({ref:'main',inputs:{command,value:String(value)}})});
+  el('cmderr').innerHTML=r.status===204?'<span class="ok">Sent — takes ~1 min, then Refresh now to see it.</span>':('Failed: HTTP '+r.status);
+}
+</script>
+</body>
+</html>
