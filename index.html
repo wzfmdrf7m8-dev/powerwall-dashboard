@@ -79,6 +79,7 @@
   <div><h1 id="title">Powerwall</h1><div class="sub" id="updated">locked</div></div>
   <div class="spacer"></div>
   <div class="sub" id="modeline"></div>
+  <button class="sec" style="font-size:12px;padding:5px 12px" onclick="lockNow()">Lock</button>
 </header>
 
 <div class="layout">
@@ -412,14 +413,25 @@ function render(d){
     options:{scales:{x:{grid:{display:false}},y:{grid:{color:'rgba(0,0,0,.06)'}}},plugins:{legend:{labels:{color:'#6e6e73'}}}}});
 }
 
-async function unlock(){
+let refresher=null;
+async function unlock(pass){
   try{
-    const p=val('pw');
+    const p=pass!==undefined?pass:val('pw');
     render(await loadData(p));
     PASS=p; el('overlay').style.display='none';
-    setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},5*60*1000);
+    localStorage.setItem('pw_pass',p);
+    if(!refresher) refresher=setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},5*60*1000);
   }catch(e){el('pwerr').textContent=e.name==='OperationError'?'Wrong password':e.message}
 }
+function lockNow(){
+  localStorage.removeItem('pw_pass');
+  PASS=null; el('pw').value=''; el('pwerr').textContent='';
+  el('overlay').style.display='flex';
+}
+window.addEventListener('load',()=>{
+  const saved=localStorage.getItem('pw_pass');
+  if(saved) unlock(saved);
+});
 el('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
 if(localStorage.getItem('pw_pat')) window.addEventListener('load',()=>{el('pat').value=localStorage.getItem('pw_pat')});
 function savePat(){localStorage.setItem('pw_pat',val('pat'));el('cmderr').innerHTML='<span class="ok">Token saved in this browser.</span>'}
