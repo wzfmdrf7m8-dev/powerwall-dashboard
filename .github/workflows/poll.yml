@@ -1,0 +1,41 @@
+name: poll
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      command:
+        description: poll, reserve, mode, storm, grid_charging
+        required: false
+        default: poll
+      value:
+        description: value (e.g. 40, self_consumption, on, off)
+        required: false
+concurrency: poll
+permissions:
+  contents: write
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests cryptography
+      - name: run
+        env:
+          TESLA_CLIENT_ID: ${{ secrets.TESLA_CLIENT_ID }}
+          TESLA_REFRESH_TOKEN: ${{ secrets.TESLA_REFRESH_TOKEN }}
+          DASH_PASSWORD: ${{ secrets.DASH_PASSWORD }}
+          COMMAND: ${{ github.event.inputs.command }}
+          VALUE: ${{ github.event.inputs.value }}
+        run: python apply.py
+      - name: commit
+        run: |
+          git config user.name pw-bot
+          git config user.email pw-bot@users.noreply.github.com
+          git add -A data state
+          git diff --cached --quiet || git commit -m "data $(date -u +%FT%TZ)"
+          git pull --rebase origin main || true
+          git push
