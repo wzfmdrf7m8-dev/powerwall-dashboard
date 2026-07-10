@@ -28,6 +28,8 @@ jobs:
           TESLA_CLIENT_ID: ${{ secrets.TESLA_CLIENT_ID }}
           TESLA_REFRESH_TOKEN: ${{ secrets.TESLA_REFRESH_TOKEN }}
           DASH_PASSWORD: ${{ secrets.DASH_PASSWORD }}
+          OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+          OCTOPUS_ACCOUNT: ${{ secrets.OCTOPUS_ACCOUNT }}
           COMMAND: ${{ github.event.inputs.command }}
           VALUE: ${{ github.event.inputs.value }}
         run: python apply.py
