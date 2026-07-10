@@ -85,7 +85,7 @@
 <div class="layout">
   <div class="card">
     <h2>Live energy flow</h2>
-    <svg id="flow" viewBox="0 0 620 430">
+    <svg id="flow" viewBox="0 0 620 330" style="max-width:560px;margin:auto">
       <defs>
         <linearGradient id="wSun" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ff9500"/><stop offset="100%" stop-color="#ff9e00"/></linearGradient>
         <linearGradient id="wMint" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#34c759"/><stop offset="100%" stop-color="#007aff"/></linearGradient>
@@ -95,36 +95,36 @@
         <radialGradient id="gHome"><stop offset="0%" stop-color="rgba(0,122,255,.32)"/><stop offset="100%" stop-color="rgba(0,122,255,0)"/></radialGradient>
         <radialGradient id="gBatt"><stop offset="0%" stop-color="rgba(52,199,89,.32)"/><stop offset="100%" stop-color="rgba(52,199,89,0)"/></radialGradient>
       </defs>
-      <path id="p_sh" class="wire" d="M 340 92 Q 480 130 520 268"/>
-      <path id="p_sb" class="wire" d="M 310 106 L 310 300"/>
-      <path id="p_sg" class="wire" d="M 280 92 Q 140 130 100 268"/>
-      <path id="p_gh" class="wire" d="M 128 300 Q 310 220 492 300"/>
-      <path id="p_gb" class="wire" d="M 122 320 Q 200 356 272 330"/>
-      <path id="p_bh" class="wire" d="M 348 330 Q 420 356 498 320"/>
+      <path id="p_sh" class="wire" d="M 340 82 Q 480 110 520 208"/>
+      <path id="p_sb" class="wire" d="M 310 96 L 310 226"/>
+      <path id="p_sg" class="wire" d="M 280 82 Q 140 110 100 208"/>
+      <path id="p_gh" class="wire" d="M 128 240 Q 310 172 492 240"/>
+      <path id="p_gb" class="wire" d="M 122 258 Q 200 288 272 254"/>
+      <path id="p_bh" class="wire" d="M 348 254 Q 420 288 498 258"/>
       <g id="dots"></g>
-      <g transform="translate(310,60)">
-        <circle r="52" fill="url(#gSun)" class="nodePulse"/>
-        <circle r="34" fill="rgba(255,149,0,.10)" stroke="url(#wSun)" stroke-width="2.5"/>
-        <text y="8" text-anchor="middle" font-size="27">&#9728;&#65039;</text>
-        <text class="node-label" y="-44">Solar</text>
-        <text id="v_solar" class="node-val" y="58">–</text>
+      <g transform="translate(310,50)">
+        <circle r="48" fill="url(#gSun)" class="nodePulse"/>
+        <circle r="32" fill="rgba(255,149,0,.10)" stroke="url(#wSun)" stroke-width="2.5"/>
+        <text y="8" text-anchor="middle" font-size="25">&#9728;&#65039;</text>
+        <text class="node-label" x="-56" y="6">Solar</text>
+        <text id="v_solar" class="node-val" y="52">–</text>
       </g>
-      <g transform="translate(96,300)">
-        <circle r="52" fill="url(#gGrid)" class="nodePulse"/>
-        <circle r="34" fill="rgba(255,59,48,.10)" stroke="url(#wPink)" stroke-width="2.5"/>
-        <text y="8" text-anchor="middle" font-size="24">&#128509;</text>
-        <text class="node-label" y="-44">Grid</text>
-        <text id="v_grid" class="node-val" y="58">–</text>
+      <g transform="translate(96,240)">
+        <circle r="48" fill="url(#gGrid)" class="nodePulse"/>
+        <circle r="32" fill="rgba(255,59,48,.10)" stroke="url(#wPink)" stroke-width="2.5"/>
+        <text y="8" text-anchor="middle" font-size="23">&#128509;</text>
+        <text class="node-label" y="-42">Grid</text>
+        <text id="v_grid" class="node-val" y="54">–</text>
       </g>
-      <g transform="translate(524,300)">
-        <circle r="52" fill="url(#gHome)" class="nodePulse"/>
-        <circle r="34" fill="rgba(0,122,255,.12)" stroke="#007aff" stroke-width="2.5"/>
-        <text y="8" text-anchor="middle" font-size="24">&#127968;</text>
-        <text class="node-label" y="-44">Home</text>
-        <text id="v_load" class="node-val" y="58">–</text>
+      <g transform="translate(524,240)">
+        <circle r="48" fill="url(#gHome)" class="nodePulse"/>
+        <circle r="32" fill="rgba(0,122,255,.12)" stroke="#007aff" stroke-width="2.5"/>
+        <text y="8" text-anchor="middle" font-size="23">&#127968;</text>
+        <text class="node-label" y="-42">Home</text>
+        <text id="v_load" class="node-val" y="54">–</text>
       </g>
-      <g transform="translate(310,340)">
-        <circle r="54" fill="url(#gBatt)" class="nodePulse"/>
+      <g transform="translate(310,258)">
+        <circle r="50" fill="url(#gBatt)" class="nodePulse"/>
         <rect x="-30" y="-26" width="60" height="52" rx="10" fill="rgba(52,199,89,.08)" stroke="url(#wMint)" stroke-width="2.5"/>
         <rect id="battFill" x="-26" y="22" width="52" height="0" rx="6" fill="rgba(52,199,89,.5)"/>
         <text id="battPct" y="6" text-anchor="middle" font-size="14" font-weight="700" fill="#1d1d1f">–</text>
@@ -203,6 +203,11 @@
     <button onclick="cmd('storm','on')">Storm on</button><button class="sec" onclick="cmd('storm','off')">Storm off</button>
     <button onclick="cmd('grid_charging','on')">Allow grid charging</button><button class="sec" onclick="cmd('grid_charging','off')">Block grid charging</button>
     <button class="sec" onclick="cmd('poll','')">Refresh now</button>
+  </div>
+  <div class="row">
+    <button onclick="cmd('follow_ohme','on')">Charge Powerwall during Ohme slots: ON</button>
+    <button class="sec" onclick="cmd('follow_ohme','off')">OFF</button>
+    <span class="sub" style="font-size:12px">When on: reserve 100% + grid charging inside your EV's cheap slots, back to your day settings outside them.</span>
   </div>
   <div class="err" id="cmderr"></div>
 </details>
@@ -381,6 +386,7 @@ function render(d){
   const a=d.automations||{};
   let html='<span class="pill">'+(a.enabled?'automation on':'automation off — monitoring only')+'</span>';
   if(a.enabled&&a.cheap_window&&a.cheap_window.enabled) html+='<span class="pill">cheap window '+a.cheap_window.start+'–'+a.cheap_window.end+'</span>';
+  html+='<span class="pill">Powerwall follows Ohme slots: '+(a.follow_ohme_slots?'on':'off')+'</span>';
   el('autos').innerHTML=html;
   el('lastlog').textContent=(d.log&&d.log.length)?('Last run: '+d.log.join('; ')):'Last run: no changes made';
 

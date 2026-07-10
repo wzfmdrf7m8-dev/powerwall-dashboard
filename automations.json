@@ -10,9 +10,10 @@
     "allow_grid_charging": true
   },
   "day": {
-    "reserve": 20,
+    "reserve": 0,
     "mode": "self_consumption",
     "allow_grid_charging": false
   },
-  "storm_watch": true
+  "storm_watch": true,
+  "follow_ohme_slots": false
 }

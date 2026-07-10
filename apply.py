@@ -219,6 +219,10 @@ def main():
             set_storm(VALUE == "on", "manual")
         elif COMMAND == "grid_charging":
             set_grid_charging(VALUE == "on", "manual")
+        elif COMMAND == "follow_ohme":
+            cfg["follow_ohme_slots"] = (VALUE == "on")
+            json.dump(cfg, open("automations.json", "w"), indent=2)
+            log.append(f"follow Ohme slots -> {'on' if cfg['follow_ohme_slots'] else 'off'}")
     elif cfg.get("enabled", True):
         # ----- scheduled automation -----
         cw = cfg.get("cheap_window", {})
@@ -270,15 +274,6 @@ def main():
     except Exception as e:
         energy = {"error": str(e)[:200]}
 
-    # ----- Octopus Energy (optional) -----
-    octopus = None
-    okey, oacct = os.environ.get("OCTOPUS_API_KEY"), os.environ.get("OCTOPUS_ACCOUNT")
-    if okey and oacct:
-        try:
-            octopus = fetch_octopus(okey, oacct, now)
-        except Exception as e:
-            octopus = {"error": str(e)[:200]}
-
     # ----- Ohme EV charger (optional, unofficial API) -----
     ohme = None
     oe, op = os.environ.get("OHME_EMAIL"), os.environ.get("OHME_PASSWORD")
@@ -287,6 +282,43 @@ def main():
             ohme = fetch_ohme(oe, op)
         except Exception as e:
             ohme = {"error": str(e)[:200]}
+
+    # ----- follow Ohme charge slots: charge Powerwall from grid during EV slots -----
+    if cfg.get("follow_ohme_slots") and ohme and not ohme.get("error"):
+        in_slot = False
+        for sl in (ohme.get("slots") or []):
+            try:
+                st = sl.get("start") if isinstance(sl, dict) else None
+                en = sl.get("end") if isinstance(sl, dict) else None
+                if st and en:
+                    st = datetime.datetime.fromisoformat(str(st))
+                    en = datetime.datetime.fromisoformat(str(en))
+                    if st.tzinfo is None:
+                        st = st.replace(tzinfo=tz)
+                    if en.tzinfo is None:
+                        en = en.replace(tzinfo=tz)
+                    if st <= now < en:
+                        in_slot = True
+            except Exception:
+                pass
+        day = cfg.get("day", {})
+        if in_slot:
+            set_reserve(100, "ohme slot")
+            set_grid_charging(True, "ohme slot")
+        else:
+            set_reserve(day.get("reserve", 0), "outside ohme slots")
+            set_grid_charging(day.get("allow_grid_charging", False), "outside ohme slots")
+        if log:
+            site_info = api(tok, "GET", f"/api/1/energy_sites/{site}/site_info")
+
+    # ----- Octopus Energy (optional) -----
+    octopus = None
+    okey, oacct = os.environ.get("OCTOPUS_API_KEY"), os.environ.get("OCTOPUS_ACCOUNT")
+    if okey and oacct:
+        try:
+            octopus = fetch_octopus(okey, oacct, now)
+        except Exception as e:
+            octopus = {"error": str(e)[:200]}
 
     bundle = {
         "octopus": octopus,
