@@ -1,5 +1,5 @@
 {
-  "enabled": true,
+  "enabled": false,
   "timezone": "Europe/London",
   "cheap_window": {
     "enabled": true,
