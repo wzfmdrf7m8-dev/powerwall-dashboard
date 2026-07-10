@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install requests cryptography
+      - run: pip install requests cryptography ohme
       - name: run
         env:
           TESLA_CLIENT_ID: ${{ secrets.TESLA_CLIENT_ID }}
@@ -30,6 +30,8 @@ jobs:
           DASH_PASSWORD: ${{ secrets.DASH_PASSWORD }}
           OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
           OCTOPUS_ACCOUNT: ${{ secrets.OCTOPUS_ACCOUNT }}
+          OHME_EMAIL: ${{ secrets.OHME_EMAIL }}
+          OHME_PASSWORD: ${{ secrets.OHME_PASSWORD }}
           COMMAND: ${{ github.event.inputs.command }}
           VALUE: ${{ github.event.inputs.value }}
         run: python apply.py
