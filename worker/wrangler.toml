@@ -2,7 +2,7 @@ name = "powerwall-poller"
 main = "src/worker.js"
 compatibility_date = "2025-01-01"
 account_id = "f7ec34691d5a86b4b461890d69a53371"
-workers_dev = true
+workers_dev = false
 
 [triggers]
 crons = ["* * * * *"]
