@@ -118,13 +118,15 @@
   <div class="card quad">
     <h3 style="color:var(--sun)">Solar</h3>
     <div class="nums"><div class="now" id="q_solar_now">–<small>kW</small></div>
-      <div><div class="tot" id="q_solar_tot">–<small>kWh</small></div><div class="totlbl">Generated</div></div></div>
+      <div><div class="tot" id="q_solar_tot">–<small>kWh</small></div><div class="totlbl">Generated</div>
+      <div class="totlbl" id="q_solar_val" style="color:var(--mint);font-weight:600"></div></div></div>
     <canvas id="q_solar" height="110"></canvas>
   </div>
   <div class="card quad">
     <h3><span style="color:var(--cyan)">Home</span><span class="qstatus" id="q_ev_lbl"></span></h3>
     <div class="nums"><div class="now" id="q_home_now">–<small>kW</small></div>
-      <div><div class="tot" id="q_home_tot">–<small>kWh</small></div><div class="totlbl">Used</div></div></div>
+      <div><div class="tot" id="q_home_tot">–<small>kWh</small></div><div class="totlbl">Used</div>
+      <div class="totlbl" id="q_home_cost" style="color:var(--pink);font-weight:600"></div></div></div>
     <canvas id="q_home" height="110"></canvas>
   </div>
   <div class="card quad">
@@ -436,6 +438,22 @@ function renderQuads(d){
   if(period==='day'){
     const h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
     const labels=h.map(p=>p.t.slice(11,16));
+    // costs from minute samples: home at time-of-use import rate; solar valued at
+    // avoided import (self-consumed) + actual Octopus export rate (exported)
+    const expRates=((d.octopus||{}).export||{}).rates||[];
+    let homeCost=0,solarVal=0,prev=null;
+    for(const p of h){
+      let dtH=1/60;
+      if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
+      const impR=rateAt(p.t.slice(11,16));
+      const expR=rateFor(expRates,new Date(p.t).toISOString())??15;
+      const load=Math.max(p.load||0,0), solar=Math.max(p.solar||0,0), exp=Math.max(-(p.grid||0),0);
+      homeCost+=load*dtH/1000*impR;
+      solarVal+=(Math.min(solar,load)*impR+Math.min(exp,solar)*expR)*dtH/1000;
+      prev=p;
+    }
+    el('q_home_cost').textContent=h.length?'≈ '+gbp(homeCost)+' at tariff':'';
+    el('q_solar_val').textContent=h.length?'≈ '+gbp(solarVal)+' value':'';
     el('q_solar_tot').innerHTML=kwhv(t.solar_energy_exported)+'<small>kWh</small>';
     el('q_home_tot').innerHTML=kwhv(e.length?homeOf(t):null)+'<small>kWh</small>';
     el('q_batt_tot').innerHTML=kwhv(t.battery_energy_exported)+'<small>kWh</small>';
@@ -452,6 +470,8 @@ function renderQuads(d){
     const n=period==='week'?7:30;
     const rows=e.slice(-n);
     const labels=rows.map(r=>r.timestamp.slice(5,10));
+    el('q_home_cost').textContent='';
+    el('q_solar_val').textContent='';
     const sum=f=>rows.length?rows.reduce((a,r)=>a+(f(r)||0),0):null;
     el('q_solar_tot').innerHTML=kwhv(sum(r=>r.solar_energy_exported))+'<small>kWh</small>';
     el('q_home_tot').innerHTML=kwhv(sum(homeOf))+'<small>kWh</small>';
