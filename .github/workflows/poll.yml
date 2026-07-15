@@ -1,7 +1,7 @@
 name: poll
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       command:
@@ -39,7 +39,7 @@ jobs:
         run: |
           git config user.name pw-bot
           git config user.email pw-bot@users.noreply.github.com
-          git add -A data state
+          git add -A
           git diff --cached --quiet || git commit -m "data $(date -u +%FT%TZ)"
           git pull --rebase origin main || true
           git push
