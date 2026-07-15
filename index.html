@@ -250,7 +250,10 @@ async function deriveKey(pass,salt){
   return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:200000,hash:'SHA-256'},km,{name:'AES-CBC',length:256},false,['decrypt']);
 }
 async function loadData(pass){
-  const res=await fetch('data/dashboard.enc?_='+Date.now(),{cache:'no-store'});
+  // prefer the 'live' branch via raw CDN (updates every minute, no Pages rebuild delay)
+  let res=null;
+  try{res=await fetch(`https://raw.githubusercontent.com/${REPO}/live/data/dashboard.enc?_=${Date.now()}`,{cache:'no-store'})}catch(e){}
+  if(!res||!res.ok) res=await fetch('data/dashboard.enc?_='+Date.now(),{cache:'no-store'});
   if(!res.ok) throw new Error('no data yet — run the poll workflow');
   const raw=Uint8Array.from(atob((await res.text()).trim()),c=>c.charCodeAt(0));
   const key=await deriveKey(pass,raw.slice(0,16));
@@ -494,7 +497,7 @@ async function unlock(pass){
     render(await loadData(p));
     PASS=p; el('overlay').style.display='none';
     localStorage.setItem('pw_pass',p);
-    if(!refresher) refresher=setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},60*1000);
+    if(!refresher) refresher=setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},30*1000);
   }catch(e){el('pwerr').textContent=e.name==='OperationError'?'Wrong password':e.message}
 }
 function lockNow(){

@@ -266,15 +266,6 @@ def main():
         }
 
     hist.append(sample(live, now))
-    # scheduled runs sample every 60s for ~4 more minutes -> 1-min resolution
-    if COMMAND == "":  # only scheduled runs do the 1-min sampling loop
-        for _ in range(4):
-            time.sleep(60)
-            try:
-                live = api(tok, "GET", f"/api/1/energy_sites/{site}/live_status")
-                hist.append(sample(live, datetime.datetime.now(tz)))
-            except Exception:
-                pass
     seen, dedup = set(), []
     for p in hist:
         if p.get("t") not in seen:
@@ -372,6 +363,32 @@ def main():
     os.makedirs("data", exist_ok=True)
     open("data/dashboard.enc", "w").write(encrypt(json.dumps(bundle).encode()))
     print("ok:", ", ".join(log) if log else "no changes", "| soc:", live.get("percentage_charged"))
+
+    # ----- live publishing: sample every 60s, push each sample to the 'live' branch -----
+    def push_live():
+        import subprocess
+        for c in (["git", "add", "data", "state"],
+                  ["git", "commit", "-m", "live", "-q"],
+                  ["git", "push", "-f", "origin", "HEAD:live", "-q"]):
+            subprocess.run(c, check=False)
+
+    if COMMAND == "":  # scheduled runs only
+        push_live()
+        for _ in range(4):
+            time.sleep(60)
+            try:
+                lv = api(tok, "GET", f"/api/1/energy_sites/{site}/live_status")
+            except Exception:
+                continue
+            ts = datetime.datetime.now(tz)
+            hist.append(sample(lv, ts))
+            del hist[:-2880]
+            bundle["live"] = lv
+            bundle["history"] = hist
+            bundle["generated_at"] = ts.isoformat(timespec="seconds")
+            open("data/dashboard.enc", "w").write(encrypt(json.dumps(bundle).encode()))
+            push_live()
+        print("live sampling complete | soc:", (bundle["live"] or {}).get("percentage_charged"))
 
 
 if __name__ == "__main__":
