@@ -384,10 +384,12 @@ async function runCommand(env, state, command, value) {
 }
 
 /* ---------------- entrypoints ---------------- */
+const ALLOWED_ORIGIN = "https://powerwall.randlefamily.com";
 const CORS = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   "Access-Control-Allow-Headers": "content-type,x-auth",
+  "Vary": "Origin",
 };
 
 export default {
@@ -413,6 +415,9 @@ export default {
       });
     }
     if (url.pathname === "/health") {
+      // gated: only returns detail to an authenticated caller
+      if (request.headers.get("x-auth") !== env.DASH_PASSWORD)
+        return new Response("ok", { headers: CORS });
       const state = await loadState(env);
       return new Response(JSON.stringify({
         ok: true, samples: state.hist.length,
