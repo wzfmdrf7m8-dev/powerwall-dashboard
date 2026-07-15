@@ -249,10 +249,12 @@ async function deriveKey(pass,salt){
   const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
   return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:200000,hash:'SHA-256'},km,{name:'AES-CBC',length:256},false,['decrypt']);
 }
+const WORKER='https://powerwall-api.randlefamily.com';
 async function loadData(pass){
-  // prefer the 'live' branch via raw CDN (updates every minute, no Pages rebuild delay)
+  // 1) Cloudflare Worker (1-min updates) 2) GitHub live branch 3) Pages copy
   let res=null;
-  try{res=await fetch(`https://raw.githubusercontent.com/${REPO}/live/data/dashboard.enc?_=${Date.now()}`,{cache:'no-store'})}catch(e){}
+  try{res=await fetch(`${WORKER}/data?_=${Date.now()}`,{cache:'no-store'})}catch(e){}
+  if(!res||!res.ok){try{res=await fetch(`https://raw.githubusercontent.com/${REPO}/live/data/dashboard.enc?_=${Date.now()}`,{cache:'no-store'})}catch(e){}}
   if(!res||!res.ok) res=await fetch('data/dashboard.enc?_='+Date.now(),{cache:'no-store'});
   if(!res.ok) throw new Error('no data yet — run the poll workflow');
   const raw=Uint8Array.from(atob((await res.text()).trim()),c=>c.charCodeAt(0));
@@ -513,13 +515,28 @@ window.addEventListener('load',()=>{
 el('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
 function savePat(){localStorage.setItem('pw_pat',val('pat'));el('cmderr').innerHTML='<span class="ok">Token saved in this browser.</span>'}
 async function cmd(command,value){
-  const pat=localStorage.getItem('pw_pat')||val('pat');
-  if(!pat){el('cmderr').textContent='Add a GitHub token first (paste it in the field on the right, then Save token).';return}
   el('cmderr').textContent='Sending…';
+  // primary: Cloudflare Worker (instant, authenticated with your dashboard password)
+  try{
+    const r=await fetch(`${WORKER}/cmd`,{method:'POST',
+      headers:{'Content-Type':'application/json','x-auth':PASS||''},
+      body:JSON.stringify({command,value:String(value)})});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok&&j.ok){
+      el('cmderr').innerHTML='<span class="ok">Done'+(j.log&&j.log.length?': '+j.log.join('; '):'')+'</span>';
+      setTimeout(async()=>{try{render(await loadData(PASS))}catch(e){}},1500);
+      return;
+    }
+    if(r.status===401){el('cmderr').textContent='Unauthorized — unlock with the correct password first.';return}
+    if(j.error){el('cmderr').textContent='Failed: '+j.error;return}
+  }catch(e){}
+  // fallback: GitHub workflow dispatch (needs token)
+  const pat=localStorage.getItem('pw_pat')||val('pat');
+  if(!pat){el('cmderr').textContent='Worker unreachable and no GitHub token set.';return}
   const r=await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/${WF}/dispatches`,{
     method:'POST',headers:{'Authorization':'Bearer '+pat,'Accept':'application/vnd.github+json'},
     body:JSON.stringify({ref:'main',inputs:{command,value:String(value)}})});
-  el('cmderr').innerHTML=r.status===204?'<span class="ok">Sent — takes ~1 min, then Refresh now to see it.</span>':('Failed: HTTP '+r.status);
+  el('cmderr').innerHTML=r.status===204?'<span class="ok">Sent via GitHub — takes ~1 min.</span>':('Failed: HTTP '+r.status);
 }
 </script>
 </body>
