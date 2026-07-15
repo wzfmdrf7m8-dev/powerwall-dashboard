@@ -262,7 +262,17 @@ async function fetchEnergyDaily(env, state, sid) {
   const now = new Date();
   const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
   const rows = [...await monthSeries(prevMonthEnd), ...await monthSeries(now)];
-  return rows.slice(-31);
+  // Tesla may return sub-daily rows — aggregate to one total per calendar day
+  const byDay = {};
+  for (const r of rows) {
+    const day = (r.timestamp || "").slice(0, 10);
+    if (!day) continue;
+    const o = (byDay[day] = byDay[day] || { timestamp: day + "T00:00:00" });
+    for (const [k, v] of Object.entries(r)) {
+      if (typeof v === "number") o[k] = (o[k] || 0) + v;
+    }
+  }
+  return Object.keys(byDay).sort().map((k) => byDay[k]).slice(-31);
 }
 async function backfillHistory(env, state, sid) {
   const merged = {};
