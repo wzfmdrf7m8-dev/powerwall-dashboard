@@ -283,6 +283,14 @@ def main():
         except Exception as e:
             ohme = {"error": str(e)[:200]}
 
+    # record EV charging power into today's history sample
+    if ohme and not ohme.get("error") and hist:
+        p = ohme.get("power")
+        if isinstance(p, dict):
+            p = p.get("watts") or p.get("watt") or p.get("value")
+        if isinstance(p, (int, float)):
+            hist[-1]["ev"] = p
+
     # ----- follow Ohme charge slots: charge Powerwall from grid during EV slots -----
     if cfg.get("follow_ohme_slots") and ohme and not ohme.get("error"):
         in_slot = False
