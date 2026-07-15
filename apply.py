@@ -15,6 +15,7 @@ import datetime
 import json
 import os
 import sys
+import time
 import zoneinfo
 
 import requests
@@ -254,15 +255,32 @@ def main():
             hist = json.loads(decrypt(open("data/dashboard.enc").read())).get("history", [])
         except Exception:
             pass
-    hist.append({
-        "t": now.isoformat(timespec="minutes"),
-        "soc": live.get("percentage_charged"),
-        "solar": live.get("solar_power"),
-        "load": live.get("load_power"),
-        "grid": live.get("grid_power"),
-        "battery": live.get("battery_power"),
-    })
-    hist = hist[-700:]  # ~7 days at 15-min cadence
+    def sample(lv, ts):
+        return {
+            "t": ts.isoformat(timespec="minutes"),
+            "soc": lv.get("percentage_charged"),
+            "solar": lv.get("solar_power"),
+            "load": lv.get("load_power"),
+            "grid": lv.get("grid_power"),
+            "battery": lv.get("battery_power"),
+        }
+
+    hist.append(sample(live, now))
+    # scheduled runs sample every 60s for ~4 more minutes -> 1-min resolution
+    if COMMAND in ("", "poll"):
+        for _ in range(4):
+            time.sleep(60)
+            try:
+                live = api(tok, "GET", f"/api/1/energy_sites/{site}/live_status")
+                hist.append(sample(live, datetime.datetime.now(tz)))
+            except Exception:
+                pass
+    seen, dedup = set(), []
+    for p in hist:
+        if p.get("t") not in seen:
+            seen.add(p.get("t"))
+            dedup.append(p)
+    hist = dedup[-2880:]  # ~2 days at 1-min cadence
 
     end_d = now.date() + datetime.timedelta(days=1)
     start_d = now.date() - datetime.timedelta(days=30)

@@ -14,20 +14,13 @@
     -webkit-font-smoothing:antialiased}
   h1{font-size:26px;letter-spacing:-.022em;font-weight:700}
   .sub{color:var(--dim);font-size:13px}
-  header{display:flex;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+  header{display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap}
   header .spacer{flex:1}
   .card{background:var(--card);border:1px solid var(--edge);border-radius:18px;padding:18px;
     box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06)}
-  .layout{display:grid;grid-template-columns:1.25fr 1fr;gap:16px;margin-bottom:16px}
+  .card h2{font-size:13px;color:var(--dim);margin-bottom:10px;text-transform:uppercase;letter-spacing:.09em}
+  .layout{display:grid;grid-template-columns:1.15fr 1fr;gap:16px;margin-bottom:16px;align-items:start}
   @media(max-width:900px){.layout{grid-template-columns:1fr}}
-  .statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
-  .stat .lbl{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.09em}
-  .stat .val{font-size:25px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
-  .stat .flow{font-size:12px;color:var(--dim)}
-  .stat{position:relative;overflow:hidden}
-  .stat::after{content:none}
-  .chartbox h2,.card h2{font-size:13px;color:var(--dim);margin-bottom:10px;text-transform:uppercase;letter-spacing:.09em}
-  .chartbox{margin-bottom:16px}
   .quadgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
   @media(max-width:800px){.quadgrid{grid-template-columns:1fr}}
   .quad h3{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
@@ -39,8 +32,9 @@
   .quad .totlbl{font-size:11px;color:var(--dim);text-align:right;margin-top:-4px}
   .socbar{display:inline-block;width:44px;height:10px;border-radius:5px;background:#e5e5ea;overflow:hidden;vertical-align:middle}
   .socbar i{display:block;height:100%;background:linear-gradient(90deg,#34c759,#30d158);border-radius:5px}
-  .ring{width:76px;height:76px}
-  #flow{width:100%;height:auto;display:block}
+  .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .toolbar h2{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;flex:1}
+  #flow{width:100%;max-width:540px;height:auto;display:block;margin:auto}
   .node-label{fill:var(--txt);font-size:14px;font-weight:700;text-anchor:middle;letter-spacing:.02em}
   .node-val{fill:var(--dim);font-size:13px;text-anchor:middle;font-variant-numeric:tabular-nums}
   .wire{fill:none;stroke:#e5e5ea;stroke-width:2.5;stroke-linecap:round}
@@ -52,20 +46,20 @@
   #overlay .box{background:var(--card);border:1px solid var(--edge);padding:36px;border-radius:22px;width:330px;text-align:center;
     box-shadow:0 20px 60px rgba(0,0,0,.10)}
   input,select,button{font:inherit;border-radius:10px;border:1px solid #d2d2d7;background:#fff;color:var(--txt);padding:8px 12px}
-  button{background:#0071e3;color:#fff;border:0;font-weight:600;cursor:pointer;border-radius:980px;padding:8px 18px}
+  button{background:#0071e3;color:#fff;border:0;font-weight:600;cursor:pointer;border-radius:980px;padding:8px 16px}
   button:hover{background:#0077ed}
   button.sec{background:#e8e8ed;color:var(--txt)}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
-  .err{color:var(--pink);font-size:13px;margin-top:8px;min-height:18px}
+  .err{color:var(--pink);font-size:13px;margin-top:4px;min-height:18px}
   .ok{color:var(--mint)}
   .pill{display:inline-block;background:#f5f5f7;border:1px solid #e5e5ea;border-radius:99px;padding:3px 12px;font-size:12px;margin:2px;color:var(--dim)}
-  details summary{cursor:pointer;color:var(--dim)}
   .today{display:flex;gap:18px;flex-wrap:wrap;margin-top:8px}
   .today div{font-size:12.5px;color:var(--dim)}
   .today b{font-size:17px;display:block;font-variant-numeric:tabular-nums;
     background:linear-gradient(90deg,var(--mint),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
   .cost b{background:linear-gradient(90deg,var(--sun),var(--pink));-webkit-background-clip:text;background-clip:text;color:transparent}
   .saved b{background:linear-gradient(90deg,var(--mint),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+  #controlsCard{margin-bottom:16px}
 </style>
 </head>
 <body>
@@ -77,14 +71,14 @@
 </div></div>
 
 <header>
-  <svg class="ring" viewBox="0 0 76 76">
+  <svg class="ring" viewBox="0 0 76 76" width="76" height="76">
     <defs>
       <linearGradient id="socGrad"><stop offset="0%" stop-color="#34c759"/><stop offset="100%" stop-color="#007aff"/></linearGradient>
     </defs>
     <circle cx="38" cy="38" r="31" fill="none" stroke="#e5e5ea" stroke-width="8"/>
     <circle id="socArc" cx="38" cy="38" r="31" fill="none" stroke="url(#socGrad)" stroke-width="8"
       stroke-linecap="round" stroke-dasharray="194.8" stroke-dashoffset="194.8" transform="rotate(-90 38 38)"
-      style="transition:stroke-dashoffset 1.2s ease;filter:drop-shadow(0 0 6px rgba(52,199,89,.7))"/>
+      style="transition:stroke-dashoffset 1.2s ease"/>
     <text id="socTxt" x="38" y="43" text-anchor="middle" font-size="16" font-weight="700" fill="#1d1d1f">–</text>
   </svg>
   <div><h1 id="title">Powerwall</h1><div class="sub" id="updated">locked</div></div>
@@ -93,10 +87,63 @@
   <button class="sec" style="font-size:12px;padding:5px 12px" onclick="lockNow()">Lock</button>
 </header>
 
+<div class="card" id="controlsCard">
+  <h2>Controls</h2>
+  <div class="row">
+    <input id="rsv" type="number" min="0" max="100" placeholder="%" style="width:74px"><button onclick="cmd('reserve',val('rsv'))">Set reserve</button>
+    <select id="mode"><option value="self_consumption">self_consumption</option><option value="autonomous">autonomous (time-based)</option></select>
+    <button onclick="cmd('mode',val('mode'))">Set mode</button>
+    <button onclick="cmd('storm','on')">Storm on</button><button class="sec" onclick="cmd('storm','off')">Storm off</button>
+    <button onclick="cmd('grid_charging','on')">Allow grid charging</button><button class="sec" onclick="cmd('grid_charging','off')">Block grid charging</button>
+    <button class="sec" onclick="cmd('poll','')">Refresh now</button>
+  </div>
+  <div class="row">
+    <button onclick="cmd('follow_ohme','on')">Charge Powerwall during Ohme slots: ON</button>
+    <button class="sec" onclick="cmd('follow_ohme','off')">OFF</button>
+    <input id="pat" type="password" placeholder="GitHub token (stored in this browser only)" style="flex:1;min-width:220px"><button class="sec" onclick="savePat()">Save token</button>
+  </div>
+  <div class="err" id="cmderr"></div>
+</div>
+
+<div class="toolbar">
+  <h2>Energy</h2>
+  <select id="period" onchange="LAST&&renderQuads(LAST)">
+    <option value="day">Today</option>
+    <option value="week">Week</option>
+    <option value="month">Month</option>
+  </select>
+</div>
+<div class="quadgrid">
+  <div class="card quad">
+    <h3 style="color:var(--sun)">Solar</h3>
+    <div class="nums"><div class="now" id="q_solar_now">–<small>kW</small></div>
+      <div><div class="tot" id="q_solar_tot">–<small>kWh</small></div><div class="totlbl">Generated</div></div></div>
+    <canvas id="q_solar" height="110"></canvas>
+  </div>
+  <div class="card quad">
+    <h3><span style="color:var(--cyan)">Home</span><span class="qstatus" id="q_ev_lbl"></span></h3>
+    <div class="nums"><div class="now" id="q_home_now">–<small>kW</small></div>
+      <div><div class="tot" id="q_home_tot">–<small>kWh</small></div><div class="totlbl">Used</div></div></div>
+    <canvas id="q_home" height="110"></canvas>
+  </div>
+  <div class="card quad">
+    <h3><span style="color:var(--mint)">Powerwall</span><span class="socbar"><i id="q_socbar" style="width:0%"></i></span><span class="qstatus" id="q_batt_status"></span></h3>
+    <div class="nums"><div class="now" id="q_batt_now">–<small>kW</small></div>
+      <div><div class="tot" id="q_batt_tot">–<small>kWh</small></div><div class="totlbl">Discharged</div></div></div>
+    <canvas id="q_batt" height="110"></canvas>
+  </div>
+  <div class="card quad">
+    <h3><span style="color:var(--pink)">Grid</span><span class="qstatus" id="q_grid_status"></span></h3>
+    <div class="nums"><div class="now" id="q_grid_now">–<small>kW</small></div>
+      <div><div class="tot" id="q_grid_tot">–<small>kWh</small></div><div class="totlbl">Net used</div></div></div>
+    <canvas id="q_grid" height="110"></canvas>
+  </div>
+</div>
+
 <div class="layout">
   <div class="card">
     <h2>Live energy flow</h2>
-    <svg id="flow" viewBox="0 0 620 330" style="max-width:560px;margin:auto">
+    <svg id="flow" viewBox="0 0 620 330">
       <defs>
         <linearGradient id="wSun" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ff9500"/><stop offset="100%" stop-color="#ff9e00"/></linearGradient>
         <linearGradient id="wMint" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#34c759"/><stop offset="100%" stop-color="#007aff"/></linearGradient>
@@ -145,12 +192,6 @@
     </svg>
   </div>
   <div>
-    <div class="statgrid">
-      <div class="card stat"><div class="lbl">Solar</div><div class="val" style="color:var(--sun)" id="solar">–</div></div>
-      <div class="card stat"><div class="lbl">Home</div><div class="val" style="color:var(--cyan)" id="load">–</div></div>
-      <div class="card stat"><div class="lbl">Grid</div><div class="val" style="color:var(--pink)" id="grid">–</div><div class="flow" id="gridflow"></div></div>
-      <div class="card stat"><div class="lbl">Battery</div><div class="val" style="color:var(--mint)" id="batt">–</div><div class="flow" id="battflow"></div></div>
-    </div>
     <div class="card">
       <h2>Today</h2>
       <div class="today">
@@ -168,7 +209,7 @@
         <div class="saved">Without solar+battery<b id="c_would">–</b></div>
         <div class="saved">Saved<b id="c_saved">–</b></div>
       </div>
-      <div class="sub" style="margin-top:6px;font-size:11.5px">Estimated from 15-minute samples</div>
+      <div class="sub" style="margin-top:6px;font-size:11.5px">Estimated from poller samples</div>
     </div>
     <div class="card" style="margin-top:12px" id="octoCard" hidden>
       <h2>Octopus metered <span id="o_day" style="text-transform:none;letter-spacing:0"></span></h2>
@@ -199,112 +240,10 @@
   </div>
 </div>
 
-<div class="quadgrid">
-  <div class="card quad">
-    <h3 style="color:var(--sun)">Solar</h3>
-    <div class="nums"><div class="now" id="q_solar_now">–<small>kW</small></div>
-      <div><div class="tot" id="q_solar_tot">–<small>kWh</small></div><div class="totlbl">Generated</div></div></div>
-    <canvas id="q_solar" height="110"></canvas>
-  </div>
-  <div class="card quad">
-    <h3><span style="color:var(--cyan)">Home</span><span class="qstatus" id="q_ev_lbl"></span></h3>
-    <div class="nums"><div class="now" id="q_home_now">–<small>kW</small></div>
-      <div><div class="tot" id="q_home_tot">–<small>kWh</small></div><div class="totlbl">Used</div></div></div>
-    <canvas id="q_home" height="110"></canvas>
-  </div>
-  <div class="card quad">
-    <h3><span style="color:var(--mint)">Powerwall</span><span class="socbar"><i id="q_socbar" style="width:0%"></i></span><span class="qstatus" id="q_batt_status"></span></h3>
-    <div class="nums"><div class="now" id="q_batt_now">–<small>kW</small></div>
-      <div><div class="tot" id="q_batt_tot">–<small>kWh</small></div><div class="totlbl">Discharged</div></div></div>
-    <canvas id="q_batt" height="110"></canvas>
-  </div>
-  <div class="card quad">
-    <h3><span style="color:var(--pink)">Grid</span><span class="qstatus" id="q_grid_status"></span></h3>
-    <div class="nums"><div class="now" id="q_grid_now">–<small>kW</small></div>
-      <div><div class="tot" id="q_grid_tot">–<small>kWh</small></div><div class="totlbl">Net used</div></div></div>
-    <canvas id="q_grid" height="110"></canvas>
-  </div>
-</div>
-<div class="card chartbox"><h2>Daily energy — last 30 days (kWh)</h2><canvas id="dayChart" height="88"></canvas></div>
-
-<details class="card">
-  <summary>Controls (requires GitHub token)</summary>
-  <div class="row"><input id="pat" type="password" placeholder="Fine-grained GitHub token (stored in this browser only)" style="flex:1"><button class="sec" onclick="savePat()">Save</button></div>
-  <div class="row">
-    <input id="rsv" type="number" min="0" max="100" placeholder="%" style="width:80px"><button onclick="cmd('reserve',val('rsv'))">Set reserve</button>
-    <select id="mode"><option value="self_consumption">self_consumption</option><option value="autonomous">autonomous (time-based)</option></select>
-    <button onclick="cmd('mode',val('mode'))">Set mode</button>
-  </div>
-  <div class="row">
-    <button onclick="cmd('storm','on')">Storm on</button><button class="sec" onclick="cmd('storm','off')">Storm off</button>
-    <button onclick="cmd('grid_charging','on')">Allow grid charging</button><button class="sec" onclick="cmd('grid_charging','off')">Block grid charging</button>
-    <button class="sec" onclick="cmd('poll','')">Refresh now</button>
-  </div>
-  <div class="row">
-    <button onclick="cmd('follow_ohme','on')">Charge Powerwall during Ohme slots: ON</button>
-    <button class="sec" onclick="cmd('follow_ohme','off')">OFF</button>
-    <span class="sub" style="font-size:12px">When on: reserve 100% + grid charging inside your EV's cheap slots, back to your day settings outside them.</span>
-  </div>
-  <div class="err" id="cmderr"></div>
-</details>
-
 <script>
 const REPO='wzfmdrf7m8-dev/powerwall-dashboard', WF='poll.yml', SVGNS='http://www.w3.org/2000/svg';
 const TARIFF={offpeak:5.9, peak:32, start:'23:30', end:'05:30'};  // pence per kWh
-let PASS=null,dayChart,quadCharts={};
-
-function mkQuad(canvasId,labels,series,color,fillBoth){
-  quadCharts[canvasId]&&quadCharts[canvasId].destroy();
-  const rgba=a=>color.replace('rgb(','rgba(').replace(')',`,${a})`);
-  quadCharts[canvasId]=new Chart(el(canvasId),{type:'line',data:{labels,datasets:series.map((s,i)=>({
-    label:s.label,data:s.data,borderColor:s.color||color,borderWidth:1.8,
-    backgroundColor:(s.color||color).replace('rgb','rgba').replace(')',',.18)'),
-    fill:fillBoth?'origin':true,pointRadius:0,tension:.3,stepped:false}))},
-    options:{animation:false,scales:{
-      y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4,callback:v=>v+' kW'}},
-      x:{ticks:{maxTicksLimit:6,color:'#6e6e73'},grid:{display:false}}},
-      plugins:{legend:{display:series.length>1,labels:{color:'#6e6e73',boxWidth:10}}},
-      interaction:{intersect:false,mode:'index'}}});
-}
-
-function renderQuads(d){
-  const today=(d.generated_at||'').slice(0,10);
-  const h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
-  const labels=h.map(p=>p.t.slice(11,16));
-  const L=d.live||{};
-  const e=(d.energy_daily||[]).filter(r=>r.timestamp);
-  const t=e.length?e[e.length-1]:{};
-  const kwv=w=>w==null?'–':(Math.abs(w)/1000).toFixed(1);
-  const kwhv=x=>x==null?'–':(x/1000).toFixed(1);
-
-  el('q_solar_now').innerHTML=kwv(L.solar_power)+'<small>kW</small>';
-  el('q_solar_tot').innerHTML=kwhv(t.solar_energy_exported)+'<small>kWh</small>';
-  mkQuad('q_solar',labels,[{label:'Solar',data:h.map(p=>(p.solar||0)/1000)}],'rgb(255,149,0)');
-
-  const homeKwh=(t.consumer_energy_imported_from_grid==null&&t.consumer_energy_imported_from_solar==null)?null:
-    ((t.consumer_energy_imported_from_grid||0)+(t.consumer_energy_imported_from_solar||0)+(t.consumer_energy_imported_from_battery||0));
-  el('q_home_now').innerHTML=kwv(L.load_power)+'<small>kW</small>';
-  el('q_home_tot').innerHTML=kwhv(homeKwh)+'<small>kWh</small>';
-  const hasEv=h.some(p=>p.ev>50);
-  el('q_ev_lbl').innerHTML=hasEv?'/ <span style="color:var(--violet)">Vehicle</span>':'';
-  const homeSeries=[{label:'Home',data:h.map(p=>(p.load||0)/1000),color:'rgb(0,122,255)'}];
-  if(hasEv) homeSeries.push({label:'Vehicle',data:h.map(p=>(p.ev||0)/1000),color:'rgb(175,82,222)'});
-  mkQuad('q_home',labels,homeSeries,'rgb(0,122,255)');
-
-  const soc=L.percentage_charged||0;
-  el('q_socbar').style.width=soc.toFixed(0)+'%';
-  el('q_batt_status').textContent=soc.toFixed(0)+'% · '+(L.battery_power>50?'Discharging':(L.battery_power<-50?'Charging':'Idle'));
-  el('q_batt_now').innerHTML=kwv(L.battery_power)+'<small>kW</small>';
-  el('q_batt_tot').innerHTML=kwhv(t.battery_energy_exported)+'<small>kWh</small>';
-  mkQuad('q_batt',labels,[{label:'Powerwall',data:h.map(p=>(p.battery||0)/1000)}],'rgb(52,199,89)',true);
-
-  const netGrid=(t.grid_energy_imported==null)?null:
-    ((t.grid_energy_imported||0)-((t.grid_energy_exported_from_solar||0)+(t.grid_energy_exported_from_battery||0)));
-  el('q_grid_status').textContent=L.grid_power>50?'Importing':(L.grid_power<-50?'Exporting':'Idle');
-  el('q_grid_now').innerHTML=kwv(L.grid_power)+'<small>kW</small>';
-  el('q_grid_tot').innerHTML=kwhv(netGrid)+'<small>kWh</small>';
-  mkQuad('q_grid',labels,[{label:'Grid',data:h.map(p=>(p.grid||0)/1000)}],'rgb(255,59,48)',true);
-}
+let PASS=null,LAST=null,quadCharts={};
 
 async function deriveKey(pass,salt){
   const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
@@ -322,11 +261,10 @@ const el=id=>document.getElementById(id), val=id=>el(id).value;
 const kw=w=>w==null?'–':(Math.abs(w)>=950?(w/1000).toFixed(1)+' kW':Math.round(w)+' W');
 const kwh=x=>x==null?'–':(x/1000).toFixed(1)+' kWh';
 const gbp=p=>p==null?'–':(p>=100?'£'+(p/100).toFixed(2):p.toFixed(1)+'p');
-
 function isOffpeak(hhmm){ return hhmm>=TARIFF.start || hhmm<TARIFF.end }
 function rateAt(hhmm){ return isOffpeak(hhmm)?TARIFF.offpeak:TARIFF.peak }
 
-/* ---- animated flow dots ---- */
+/* ---- flow dots ---- */
 function setDots(pathId,watts,color,reverse){
   const w=Math.abs(watts||0), path=el(pathId);
   path.classList.toggle('active',w>50);
@@ -339,7 +277,7 @@ function setDots(pathId,watts,color,reverse){
   for(let i=0;i<n;i++){
     const c=document.createElementNS(SVGNS,'circle');
     c.setAttribute('r',w>3000?5.5:4.5); c.setAttribute('fill',color);
-    c.style.filter=`drop-shadow(0 0 8px ${color}) drop-shadow(0 0 16px ${color})`;
+    c.style.filter=`drop-shadow(0 0 8px ${color})`;
     const m=document.createElementNS(SVGNS,'animateMotion');
     m.setAttribute('dur',dur+'s'); m.setAttribute('repeatCount','indefinite');
     m.setAttribute('begin',(-i*dur/n)+'s');
@@ -380,18 +318,19 @@ function renderFlow(L){
   el('socTxt').textContent=soc.toFixed(0)+'%';
 }
 
-/* ---- cost estimate from 15-min history samples ---- */
+/* ---- cost estimate (dt-aware: samples may be 1-min or 15-min apart) ---- */
 function renderCost(hist,genAt){
   const today=(genAt||'').slice(0,10);
-  let cost=0, off=0, peak=0, would=0;
+  let cost=0, off=0, peak=0, would=0, prev=null;
   for(const p of hist){
-    if(!p.t || p.t.slice(0,10)!==today) continue;
+    if(!p.t || p.t.slice(0,10)!==today){prev=p;continue}
     const hhmm=p.t.slice(11,16), r=rateAt(hhmm);
-    const impKwh=Math.max(p.grid||0,0)*0.25/1000;
-    const loadKwh=Math.max(p.load||0,0)*0.25/1000;
-    const c=impKwh*r;
+    let dtH=0.25;
+    if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
+    const c=Math.max(p.grid||0,0)*dtH/1000*r;
     cost+=c; if(isOffpeak(hhmm)) off+=c; else peak+=c;
-    would+=loadKwh*r;
+    would+=Math.max(p.load||0,0)*dtH/1000*r;
+    prev=p;
   }
   el('c_cost').textContent=gbp(cost);
   el('c_split').textContent=gbp(off)+' / '+gbp(peak);
@@ -399,9 +338,8 @@ function renderCost(hist,genAt){
   el('c_saved').textContent=gbp(Math.max(would-cost,0));
 }
 
-/* ---- Octopus metered data (actual smart-meter kWh × actual rates) ---- */
+/* ---- Octopus ---- */
 function octoDay(side){
-  // group consumption by date, return the most recent complete-ish day
   const byDay={};
   for(const c of (side&&side.consumption)||[]){
     const day=(c.interval_start||'').slice(0,10);
@@ -413,9 +351,7 @@ function octoDay(side){
   return {day,rows:byDay[day]||[]};
 }
 function rateFor(rates,t){
-  for(const r of rates||[]){
-    if(r.valid_from<=t && (r.valid_to===null||t<r.valid_to)) return r.value_inc_vat;
-  }
+  for(const r of rates||[]){ if(r.valid_from<=t&&(r.valid_to===null||t<r.valid_to)) return r.value_inc_vat }
   return null;
 }
 function octoTotals(side){
@@ -444,6 +380,7 @@ function renderOcto(o){
   if(tf) el('o_tariffs').textContent=tf+' · smart-meter data lags ~1 day';
 }
 
+/* ---- Ohme ---- */
 function renderOhme(o){
   const card=el('ohmeCard');
   if(!o||o.error){card.hidden=true;return}
@@ -457,19 +394,80 @@ function renderOhme(o){
   el('ev_soc').textContent=(typeof o.battery==='number')?o.battery+'%':'–';
 }
 
+/* ---- quadrant charts with Day / Week / Month ---- */
+function mkQuad(canvasId,labels,series,type){
+  quadCharts[canvasId]&&quadCharts[canvasId].destroy();
+  quadCharts[canvasId]=new Chart(el(canvasId),{type:type||'line',data:{labels,datasets:series.map(s=>({
+    label:s.label,data:s.data,borderColor:s.color,borderWidth:1.8,
+    backgroundColor:s.color.replace('rgb','rgba').replace(')',type==='bar'?',.85)':',.18)'),
+    fill:type==='bar'?undefined:'origin',pointRadius:0,tension:.3,borderRadius:type==='bar'?4:0}))},
+    options:{animation:false,scales:{
+      y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4}},
+      x:{ticks:{maxTicksLimit:6,color:'#6e6e73'},grid:{display:false}}},
+      plugins:{legend:{display:series.length>1,labels:{color:'#6e6e73',boxWidth:10}}},
+      interaction:{intersect:false,mode:'index'}}});
+}
+function renderQuads(d){
+  const period=val('period');
+  const today=(d.generated_at||'').slice(0,10);
+  const L=d.live||{};
+  const e=(d.energy_daily||[]).filter(r=>r.timestamp);
+  const t=e.length?e[e.length-1]:{};
+  const kwv=w=>w==null?'–':(Math.abs(w)/1000).toFixed(1);
+  const kwhv=x=>x==null?'–':(x/1000).toFixed(1);
+  const homeOf=r=>((r.consumer_energy_imported_from_grid||0)+(r.consumer_energy_imported_from_solar||0)+(r.consumer_energy_imported_from_battery||0));
+  const netOf=r=>((r.grid_energy_imported||0)-((r.grid_energy_exported_from_solar||0)+(r.grid_energy_exported_from_battery||0)));
+
+  el('q_solar_now').innerHTML=kwv(L.solar_power)+'<small>kW</small>';
+  el('q_home_now').innerHTML=kwv(L.load_power)+'<small>kW</small>';
+  el('q_batt_now').innerHTML=kwv(L.battery_power)+'<small>kW</small>';
+  el('q_grid_now').innerHTML=kwv(L.grid_power)+'<small>kW</small>';
+  const soc=L.percentage_charged||0;
+  el('q_socbar').style.width=soc.toFixed(0)+'%';
+  el('q_batt_status').textContent=soc.toFixed(0)+'% · '+(L.battery_power>50?'Discharging':(L.battery_power<-50?'Charging':'Idle'));
+  el('q_grid_status').textContent=L.grid_power>50?'Importing':(L.grid_power<-50?'Exporting':'Idle');
+
+  if(period==='day'){
+    const h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
+    const labels=h.map(p=>p.t.slice(11,16));
+    el('q_solar_tot').innerHTML=kwhv(t.solar_energy_exported)+'<small>kWh</small>';
+    el('q_home_tot').innerHTML=kwhv(e.length?homeOf(t):null)+'<small>kWh</small>';
+    el('q_batt_tot').innerHTML=kwhv(t.battery_energy_exported)+'<small>kWh</small>';
+    el('q_grid_tot').innerHTML=kwhv(e.length?netOf(t):null)+'<small>kWh</small>';
+    mkQuad('q_solar',labels,[{label:'Solar kW',data:h.map(p=>(p.solar||0)/1000),color:'rgb(255,149,0)'}]);
+    const hasEv=h.some(p=>p.ev>50);
+    el('q_ev_lbl').innerHTML=hasEv?'/ <span style="color:var(--violet)">Vehicle</span>':'';
+    const hs=[{label:'Home kW',data:h.map(p=>(p.load||0)/1000),color:'rgb(0,122,255)'}];
+    if(hasEv) hs.push({label:'Vehicle kW',data:h.map(p=>(p.ev||0)/1000),color:'rgb(175,82,222)'});
+    mkQuad('q_home',labels,hs);
+    mkQuad('q_batt',labels,[{label:'Powerwall kW',data:h.map(p=>(p.battery||0)/1000),color:'rgb(52,199,89)'}]);
+    mkQuad('q_grid',labels,[{label:'Grid kW',data:h.map(p=>(p.grid||0)/1000),color:'rgb(255,59,48)'}]);
+  }else{
+    const n=period==='week'?7:30;
+    const rows=e.slice(-n);
+    const labels=rows.map(r=>r.timestamp.slice(5,10));
+    const sum=f=>rows.length?rows.reduce((a,r)=>a+(f(r)||0),0):null;
+    el('q_solar_tot').innerHTML=kwhv(sum(r=>r.solar_energy_exported))+'<small>kWh</small>';
+    el('q_home_tot').innerHTML=kwhv(sum(homeOf))+'<small>kWh</small>';
+    el('q_batt_tot').innerHTML=kwhv(sum(r=>r.battery_energy_exported))+'<small>kWh</small>';
+    el('q_grid_tot').innerHTML=kwhv(sum(netOf))+'<small>kWh</small>';
+    el('q_ev_lbl').innerHTML='';
+    mkQuad('q_solar',labels,[{label:'Solar kWh/day',data:rows.map(r=>(r.solar_energy_exported||0)/1000),color:'rgb(255,149,0)'}],'bar');
+    mkQuad('q_home',labels,[{label:'Home kWh/day',data:rows.map(r=>homeOf(r)/1000),color:'rgb(0,122,255)'}],'bar');
+    mkQuad('q_batt',labels,[{label:'Discharged kWh/day',data:rows.map(r=>(r.battery_energy_exported||0)/1000),color:'rgb(52,199,89)'}],'bar');
+    mkQuad('q_grid',labels,[{label:'Net grid kWh/day',data:rows.map(r=>netOf(r)/1000),color:'rgb(255,59,48)'}],'bar');
+  }
+}
+
 function render(d){
-  renderOcto(d.octopus);
-  renderOhme(d.ohme);
+  LAST=d;
   el('title').textContent=d.site_name||'Powerwall';
   el('updated').textContent='Updated '+new Date(d.generated_at).toLocaleString();
   const L=d.live||{};
+  renderQuads(d);
   renderFlow(L);
-  el('solar').textContent=kw(L.solar_power);
-  el('load').textContent=kw(L.load_power);
-  el('grid').textContent=kw(Math.abs(L.grid_power));
-  el('gridflow').textContent=L.grid_power>50?'importing':(L.grid_power<-50?'exporting':'idle');
-  el('batt').textContent=kw(Math.abs(L.battery_power));
-  el('battflow').textContent=L.battery_power>50?'discharging':(L.battery_power<-50?'charging':'idle');
+  renderOcto(d.octopus);
+  renderOhme(d.ohme);
   const si=d.site_info||{};
   el('modeline').textContent=`reserve ${si.backup_reserve_percent??'–'}% · ${si.default_real_mode||'–'} · storm watch ${((si.user_settings||{}).storm_mode_enabled?'on':'off')}`;
   const a=d.automations||{};
@@ -480,22 +478,13 @@ function render(d){
   el('lastlog').textContent=(d.log&&d.log.length)?('Last run: '+d.log.join('; ')):'Last run: no changes made';
 
   const e=(d.energy_daily||[]).filter(r=>r.timestamp);
-  const t=e[e.length-1]||{};
-  const home=r=>((r.consumer_energy_imported_from_grid||0)+(r.consumer_energy_imported_from_solar||0)+(r.consumer_energy_imported_from_battery||0));
+  const t=e.length?e[e.length-1]:{};
+  const homeOf=r=>((r.consumer_energy_imported_from_grid||0)+(r.consumer_energy_imported_from_solar||0)+(r.consumer_energy_imported_from_battery||0));
   el('t_solar').textContent=kwh(t.solar_energy_exported);
-  el('t_home').textContent=kwh(home(t));
+  el('t_home').textContent=kwh(e.length?homeOf(t):null);
   el('t_imp').textContent=kwh(t.grid_energy_imported);
-  el('t_exp').textContent=kwh((t.grid_energy_exported_from_solar||0)+(t.grid_energy_exported_from_battery||0));
-
+  el('t_exp').textContent=kwh(e.length?((t.grid_energy_exported_from_solar||0)+(t.grid_energy_exported_from_battery||0)):null);
   renderCost(d.history||[], d.generated_at);
-
-  renderQuads(d);
-  dayChart&&dayChart.destroy();
-  dayChart=new Chart(el('dayChart'),{type:'bar',data:{labels:e.map(r=>r.timestamp.slice(5,10)),datasets:[
-    {label:'Solar',data:e.map(r=>(r.solar_energy_exported||0)/1000),backgroundColor:'#ff9500',borderRadius:5},
-    {label:'Home',data:e.map(r=>home(r)/1000),backgroundColor:'#007aff',borderRadius:5},
-    {label:'Grid import',data:e.map(r=>(r.grid_energy_imported||0)/1000),backgroundColor:'#ff3b30',borderRadius:5}]},
-    options:{scales:{x:{grid:{display:false}},y:{grid:{color:'rgba(0,0,0,.06)'}}},plugins:{legend:{labels:{color:'#6e6e73'}}}}});
 }
 
 let refresher=null;
@@ -505,7 +494,7 @@ async function unlock(pass){
     render(await loadData(p));
     PASS=p; el('overlay').style.display='none';
     localStorage.setItem('pw_pass',p);
-    if(!refresher) refresher=setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},5*60*1000);
+    if(!refresher) refresher=setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},60*1000);
   }catch(e){el('pwerr').textContent=e.name==='OperationError'?'Wrong password':e.message}
 }
 function lockNow(){
@@ -516,13 +505,13 @@ function lockNow(){
 window.addEventListener('load',()=>{
   const saved=localStorage.getItem('pw_pass');
   if(saved) unlock(saved);
+  if(localStorage.getItem('pw_pat')) el('pat').value=localStorage.getItem('pw_pat');
 });
 el('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
-if(localStorage.getItem('pw_pat')) window.addEventListener('load',()=>{el('pat').value=localStorage.getItem('pw_pat')});
 function savePat(){localStorage.setItem('pw_pat',val('pat'));el('cmderr').innerHTML='<span class="ok">Token saved in this browser.</span>'}
 async function cmd(command,value){
   const pat=localStorage.getItem('pw_pat')||val('pat');
-  if(!pat){el('cmderr').textContent='Add a GitHub token first (repo Actions write access).';return}
+  if(!pat){el('cmderr').textContent='Add a GitHub token first (paste it in the field on the right, then Save token).';return}
   el('cmderr').textContent='Sending…';
   const r=await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/${WF}/dispatches`,{
     method:'POST',headers:{'Authorization':'Bearer '+pat,'Accept':'application/vnd.github+json'},
