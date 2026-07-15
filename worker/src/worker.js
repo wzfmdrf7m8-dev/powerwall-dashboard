@@ -236,9 +236,12 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
       log.push(`grid charging -> ${allowed} (${why})`);
     }
   };
-  if (cfg.follow_ohme_slots && state.ohmeData && !state.ohmeData.error) {
+  if (cfg.follow_ohme_slots) {
+    // fail-safe: if Ohme state is unknown/errored, treat as NOT in a slot so we
+    // always revert to day settings rather than staying parked at 100% reserve
+    const ohmeOk = state.ohmeData && !state.ohmeData.error;
     const nowIso = new Date().toISOString();
-    const inSlot = (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso && nowIso < sl.end);
+    const inSlot = ohmeOk && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso && nowIso < sl.end);
     const day = cfg.day || {};
     if (inSlot) { await setReserve(100, "ohme slot"); await setGridCharging(true, "ohme slot"); }
     else { await setReserve(day.reserve ?? 0, "outside ohme slots"); await setGridCharging(!!day.allow_grid_charging, "outside ohme slots"); }
