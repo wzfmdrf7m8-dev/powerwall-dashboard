@@ -411,7 +411,7 @@ function mkQuad(canvasId,labels,series,type){
   quadCharts[canvasId]=new Chart(el(canvasId),{type:type||'line',data:{labels,datasets:series.map(s=>({
     label:s.label,data:s.data,borderColor:s.color,borderWidth:1.8,
     backgroundColor:s.color.replace('rgb','rgba').replace(')',type==='bar'?',.85)':',.18)'),
-    fill:type==='bar'?undefined:'origin',pointRadius:0,tension:.3,borderRadius:type==='bar'?4:0}))},
+    fill:type==='bar'?undefined:'origin',pointRadius:0,tension:.3,spanGaps:false,borderRadius:type==='bar'?4:0}))},
     options:{animation:false,scales:{
       y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4}},
       x:{ticks:{maxTicksLimit:6,color:'#6e6e73'},grid:{display:false}}},
@@ -440,35 +440,42 @@ function renderQuads(d){
 
   if(period==='day'){
     const h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
-    const labels=h.map(p=>p.t.slice(11,16));
-    // costs from minute samples: home at time-of-use import rate; solar valued at
-    // avoided import (self-consumed) + actual Octopus export rate (exported)
+    // costs: solar = total generated × export rate; home = total used × import rate
+    // (off-peak in the window, during EV smart-charge slots, or while car charging)
     const expRates=((d.octopus||{}).export||{}).rates||[];
     let homeCost=0,solarVal=0,prev=null;
     for(const p of h){
       let dtH=1/60;
       if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
-      const impR=sampleRate(p);
       const expR=rateFor(expRates,new Date(p.t).toISOString())??15;
-      const load=Math.max(p.load||0,0), solar=Math.max(p.solar||0,0), exp=Math.max(-(p.grid||0),0);
-      homeCost+=load*dtH/1000*impR;
-      solarVal+=(Math.min(solar,load)*impR+Math.min(exp,solar)*expR)*dtH/1000;
+      homeCost+=Math.max(p.load||0,0)*dtH/1000*sampleRate(p);
+      solarVal+=Math.max(p.solar||0,0)*dtH/1000*expR;
       prev=p;
     }
-    el('q_home_cost').textContent=h.length?'≈ '+gbp(homeCost)+' at tariff':'';
-    el('q_solar_val').textContent=h.length?'≈ '+gbp(solarVal)+' value':'';
+    el('q_home_cost').textContent=h.length?'≈ '+gbp(homeCost)+' cost':'';
+    el('q_solar_val').textContent=h.length?'≈ '+gbp(solarVal)+' at export rate':'';
+    // full 24h axis: bucket samples into 15-min bins, gaps where no data
+    const labels=[],mk=()=>Array(96).fill(null),sums={},cnts={};
+    for(let i=0;i<96;i++) labels.push(String(Math.floor(i/4)).padStart(2,'0')+':'+String((i%4)*15).padStart(2,'0'));
+    const bin=(key,idx,v)=>{if(v==null)return;(sums[key]=sums[key]||mk())[idx]=(sums[key][idx]||0)+v;(cnts[key]=cnts[key]||mk())[idx]=(cnts[key][idx]||0)+1};
+    for(const p of h){
+      const idx=parseInt(p.t.slice(11,13),10)*4+Math.floor(parseInt(p.t.slice(14,16),10)/15);
+      if(idx<0||idx>95)continue;
+      bin('solar',idx,p.solar);bin('load',idx,p.load);bin('grid',idx,p.grid);bin('battery',idx,p.battery);bin('ev',idx,p.ev);
+    }
+    const series=key=>mk().map((_,i)=>cnts[key]&&cnts[key][i]?sums[key][i]/cnts[key][i]/1000:null);
     el('q_solar_tot').innerHTML=kwhv(t.solar_energy_exported)+'<small>kWh</small>';
     el('q_home_tot').innerHTML=kwhv(e.length?homeOf(t):null)+'<small>kWh</small>';
     el('q_batt_tot').innerHTML=kwhv(t.battery_energy_exported)+'<small>kWh</small>';
     el('q_grid_tot').innerHTML=kwhv(e.length?netOf(t):null)+'<small>kWh</small>';
-    mkQuad('q_solar',labels,[{label:'Solar kW',data:h.map(p=>(p.solar||0)/1000),color:'rgb(255,149,0)'}]);
+    mkQuad('q_solar',labels,[{label:'Solar kW',data:series('solar'),color:'rgb(255,149,0)'}]);
     const hasEv=h.some(p=>p.ev>50);
     el('q_ev_lbl').innerHTML=hasEv?'/ <span style="color:var(--violet)">Vehicle</span>':'';
-    const hs=[{label:'Home kW',data:h.map(p=>(p.load||0)/1000),color:'rgb(0,122,255)'}];
-    if(hasEv) hs.push({label:'Vehicle kW',data:h.map(p=>(p.ev||0)/1000),color:'rgb(175,82,222)'});
+    const hs=[{label:'Home kW',data:series('load'),color:'rgb(0,122,255)'}];
+    if(hasEv) hs.push({label:'Vehicle kW',data:series('ev'),color:'rgb(175,82,222)'});
     mkQuad('q_home',labels,hs);
-    mkQuad('q_batt',labels,[{label:'Powerwall kW',data:h.map(p=>(p.battery||0)/1000),color:'rgb(52,199,89)'}]);
-    mkQuad('q_grid',labels,[{label:'Grid kW',data:h.map(p=>(p.grid||0)/1000),color:'rgb(255,59,48)'}]);
+    mkQuad('q_batt',labels,[{label:'Powerwall kW',data:series('battery'),color:'rgb(52,199,89)'}]);
+    mkQuad('q_grid',labels,[{label:'Grid kW',data:series('grid'),color:'rgb(255,59,48)'}]);
   }else{
     const n=period==='week'?7:30;
     const rows=e.slice(-n);
