@@ -45,13 +45,13 @@ function hhmm(d = new Date()) { const p = londonParts(d); return `${p.hour}:${p.
 
 /* ---------------- crypto (matches dashboard: salt16|iv16|AES-CBC(PKCS7)) ---------------- */
 const te = new TextEncoder(), td = new TextDecoder();
-const b64e = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const b64e = (buf) => {
+  const u8 = new Uint8Array(buf); let s = "";
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+};
 const b64d = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
-async function deriveKeyRaw(password, salt) {
-  const km = await crypto.subtle.importKey("raw", te.encode(password), "PBKDF2", false, ["deriveBits"]);
-  return crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" }, km, 256);
-}
 async function importAes(rawBytes, usages) {
   return crypto.subtle.importKey("raw", rawBytes, { name: "AES-CBC" }, false, usages);
 }
@@ -64,25 +64,15 @@ async function encryptBundle(state, obj) {
   out.set(salt, 0); out.set(iv, 16); out.set(new Uint8Array(ct), 32);
   return b64e(out);
 }
-async function decryptB64(password, b64) {
-  const raw = b64d(b64.trim());
-  const keyRaw = await deriveKeyRaw(password, raw.slice(0, 16));
-  const key = await importAes(keyRaw, ["decrypt"]);
-  const pt = await crypto.subtle.decrypt({ name: "AES-CBC", iv: raw.slice(16, 32) }, key, raw.slice(32));
-  return td.decode(pt);
-}
-
 /* ---------------- state ---------------- */
 async function loadState(env) {
   const obj = await env.PW.get("state.json");
   const state = obj ? JSON.parse(await obj.text()) : {};
   state.config = { ...DEFAULT_CONFIG, ...(state.config || {}) };
   state.hist = state.hist || [];
-  if (!state.keySalt) {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    state.keySalt = b64e(salt);
-    state.keyRaw = b64e(await deriveKeyRaw(env.DASH_PASSWORD, salt));
-  }
+  // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
+  state.keySalt = env.DASH_SALT_B64;
+  state.keyRaw = env.DASH_KEY_B64;
   return state;
 }
 async function saveState(env, state) {
@@ -93,18 +83,7 @@ async function saveState(env, state) {
 async function teslaToken(env, state) {
   const now = Date.now() / 1000;
   if (state.access_token && (state.access_exp || 0) > now + 600) return state.access_token;
-  const candidates = [];
-  if (state.refresh_token) candidates.push(state.refresh_token);
-  // bootstrap: current rotated token lives encrypted in the repo
-  if (!state.refresh_token) {
-    for (const branch of ["live", "main"]) {
-      try {
-        const r = await fetch(`${REPO_RAW}/${branch}/state/refresh.enc?_=${Date.now()}`);
-        if (r.ok) { candidates.push(await decryptB64(env.DASH_PASSWORD, await r.text())); break; }
-      } catch (e) {}
-    }
-    if (env.TESLA_REFRESH_TOKEN) candidates.push(env.TESLA_REFRESH_TOKEN);
-  }
+  const candidates = [state.refresh_token, env.TESLA_REFRESH_TOKEN].filter(Boolean);
   let lastErr = "no refresh token candidates";
   for (const rt of candidates) {
     const r = await fetch(TESLA_TOKEN_URL, {
