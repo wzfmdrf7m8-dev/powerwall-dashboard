@@ -1,0 +1,16 @@
+name = "powerwall-poller"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+account_id = "f7ec34691d5a86b4b461890d69a53371"
+workers_dev = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[[r2_buckets]]
+binding = "PW"
+bucket_name = "powerwall-data"
+
+[[routes]]
+pattern = "powerwall-api.randlefamily.com"
+custom_domain = true
