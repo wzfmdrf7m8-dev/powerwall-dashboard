@@ -12,7 +12,7 @@ const DEFAULT_CONFIG = {
   enabled: false,
   timezone: TZ,
   cheap_window: { enabled: true, start: "23:30", end: "05:30", reserve: 100, mode: "self_consumption", allow_grid_charging: true },
-  day: { reserve: 0, mode: "self_consumption", allow_grid_charging: false },
+  day: { reserve: 0, mode: "self_consumption", allow_grid_charging: true },
   storm_watch: true,
   follow_ohme_slots: false,
 };
@@ -42,6 +42,11 @@ function localOffsetISO(d = new Date()) {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}${offset}`;
 }
 function hhmm(d = new Date()) { const p = londonParts(d); return `${p.hour}:${p.minute}`; }
+function londonDayEndISO(d) {
+  const p = londonParts(d);
+  const offset = localOffsetISO(d).slice(19) || "+00:00";
+  return `${p.year}-${p.month}-${p.day}T23:59:59${offset}`;
+}
 
 /* ---------------- crypto (matches dashboard: salt16|iv16|AES-CBC(PKCS7)) ---------------- */
 const te = new TextEncoder(), td = new TextDecoder();
@@ -72,6 +77,8 @@ async function loadState(env) {
   state.hist = state.hist || [];
   // one-time migration (requested 2026-07-15): enable Powerwall follow-Ohme-slots
   if (!state.mig_fo1) { state.config.follow_ohme_slots = true; state.mig_fo1 = 1; }
+  // one-time migration (requested 2026-07-16): grid charging always allowed
+  if (!state.mig_gc1) { state.config.day = { ...(state.config.day || {}), allow_grid_charging: true }; state.mig_gc1 = 1; }
   // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
   state.keySalt = env.DASH_SALT_B64;
   state.keyRaw = env.DASH_KEY_B64;
@@ -285,9 +292,8 @@ async function backfillHistory(env, state, sid) {
   for (const p of state.hist) if (p.t) merged[p.t.slice(0, 16)] = p;
   for (let off = 2; off >= 0; off--) {
     const d = new Date(Date.now() - off * 864e5);
-    const dayEnd = new Date(d); dayEnd.setHours(23, 59, 59);
     const r = await tesla(env, state, "GET", `/api/1/energy_sites/${sid}/calendar_history`, null,
-      { kind: "power", period: "day", end_date: localOffsetISO(dayEnd), time_zone: TZ });
+      { kind: "power", period: "day", end_date: londonDayEndISO(d), time_zone: TZ });
     for (const row of (r || {}).time_series || []) {
       const ts = (row.timestamp || "").slice(0, 16);
       if (!ts || merged[ts]) continue;
@@ -333,6 +339,9 @@ async function pollCycle(env, state, opts = {}) {
   if (!state.energyDaily || now - (state.lastEnergy || 0) > 1800 || opts.force) {
     try { state.energyDaily = await fetchEnergyDaily(env, state, sid); state.lastEnergy = now; }
     catch (e) { log.push("energy error: " + String(e).slice(0, 120)); }
+    // self-heal intraday chart gaps from Tesla's stored 5-min power history
+    try { await backfillHistory(env, state, sid); state.hist = state.hist.slice(-HIST_MAX); }
+    catch (e) { log.push("autofill error: " + String(e).slice(0, 120)); }
   }
   if (env.OCTOPUS_API_KEY && (!state.octopus || now - (state.lastOcto || 0) > 1800 || opts.force)) {
     try { state.octopus = await fetchOctopus(env); state.lastOcto = now; }
