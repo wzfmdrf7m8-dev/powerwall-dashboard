@@ -273,6 +273,34 @@ def main():
             dedup.append(p)
     hist = dedup[-2880:]  # ~2 days at 1-min cadence
 
+    # ----- backfill: pull Tesla's stored 5-min power history to fill chart gaps -----
+    if COMMAND == "backfill":
+        try:
+            merged = {p.get("t", "")[:16]: p for p in hist if p.get("t")}
+            for d_off in range(2, -1, -1):
+                day_end = (now - datetime.timedelta(days=d_off)).replace(hour=23, minute=59, second=59)
+                r = api(tok, "GET", f"/api/1/energy_sites/{site}/calendar_history", params={
+                    "kind": "power", "period": "day",
+                    "end_date": day_end.isoformat(),
+                    "time_zone": cfg.get("timezone", "Europe/London")})
+                for row in (r or {}).get("time_series", []):
+                    ts = (row.get("timestamp") or "")[:16]
+                    if not ts or ts in merged:
+                        continue
+                    so = row.get("solar_power") or 0
+                    ba = row.get("battery_power") or 0
+                    gr = row.get("grid_power") or 0
+                    lo = row.get("load_power")
+                    if lo is None:
+                        lo = so + ba + gr
+                    merged[ts] = {"t": ts, "soc": row.get("percentage_charged"),
+                                  "solar": so, "load": lo, "grid": gr, "battery": ba}
+            hist = sorted(merged.values(), key=lambda p: p.get("t", ""))[-2880:]
+            log.append(f"backfilled history ({len(hist)} samples)")
+        except Exception as e:
+            log.append(f"backfill failed: {str(e)[:120]}")
+            print("backfill_error:", e, file=sys.stderr)
+
     # daily energy: month-period queries return one row per day
     tzname = cfg.get("timezone", "Europe/London")
     energy_rows, energy_err = [], None
