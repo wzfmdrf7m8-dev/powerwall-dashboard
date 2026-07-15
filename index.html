@@ -480,9 +480,24 @@ function renderQuads(d){
     const n=period==='week'?7:30;
     const rows=e.slice(-n);
     const labels=rows.map(r=>r.timestamp.slice(5,10));
-    el('q_home_cost').textContent='';
-    el('q_solar_val').textContent='';
     const sum=f=>rows.length?rows.reduce((a,r)=>a+(f(r)||0),0):null;
+    // period £: solar = kWh × export rate; home = kWh × blended tariff
+    // (off-peak share measured from recent minute-level history)
+    const expRates=((d.octopus||{}).export||{}).rates||[];
+    const expR=rateFor(expRates,new Date().toISOString())??15;
+    let offWh=0,totWh=0,pv=null;
+    for(const p of (d.history||[])){
+      let dtH=1/60;
+      if(pv&&pv.t){const dt=(new Date(p.t)-new Date(pv.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
+      const wh=Math.max(p.load||0,0)*dtH;
+      totWh+=wh; if(sampleOffpeak(p)) offWh+=wh;
+      pv=p;
+    }
+    const share=totWh>0?offWh/totWh:0;
+    const blended=share*TARIFF.offpeak+(1-share)*TARIFF.peak;
+    const sumSolar=sum(r=>r.solar_energy_exported), sumHome=sum(homeOf);
+    el('q_solar_val').textContent=sumSolar!=null?'≈ '+gbp(sumSolar/1000*expR)+' at export rate':'';
+    el('q_home_cost').textContent=sumHome!=null?'≈ '+gbp(sumHome/1000*blended)+' at blended tariff':'';
     el('q_solar_tot').innerHTML=kwhv(sum(r=>r.solar_energy_exported))+'<small>kWh</small>';
     el('q_home_tot').innerHTML=kwhv(sum(homeOf))+'<small>kWh</small>';
     el('q_batt_tot').innerHTML=kwhv(sum(r=>r.battery_energy_exported))+'<small>kWh</small>';
