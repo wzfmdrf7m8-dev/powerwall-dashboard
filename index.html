@@ -271,6 +271,9 @@ const kwh=x=>x==null?'–':(x/1000).toFixed(1)+' kWh';
 const gbp=p=>p==null?'–':(p>=100?'£'+(p/100).toFixed(2):p.toFixed(1)+'p');
 function isOffpeak(hhmm){ return hhmm>=TARIFF.start || hhmm<TARIFF.end }
 function rateAt(hhmm){ return isOffpeak(hhmm)?TARIFF.offpeak:TARIFF.peak }
+// Intelligent Octopus: whole-house off-peak also applies during EV smart-charge slots
+function sampleOffpeak(p){ return isOffpeak((p.t||'').slice(11,16)) || !!p.io || ((p.ev||0)>250) }
+function sampleRate(p){ return sampleOffpeak(p)?TARIFF.offpeak:TARIFF.peak }
 
 /* ---- flow dots ---- */
 function setDots(pathId,watts,color,reverse){
@@ -332,11 +335,11 @@ function renderCost(hist,genAt){
   let cost=0, off=0, peak=0, would=0, prev=null;
   for(const p of hist){
     if(!p.t || p.t.slice(0,10)!==today){prev=p;continue}
-    const hhmm=p.t.slice(11,16), r=rateAt(hhmm);
+    const r=sampleRate(p);
     let dtH=0.25;
     if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
     const c=Math.max(p.grid||0,0)*dtH/1000*r;
-    cost+=c; if(isOffpeak(hhmm)) off+=c; else peak+=c;
+    cost+=c; if(sampleOffpeak(p)) off+=c; else peak+=c;
     would+=Math.max(p.load||0,0)*dtH/1000*r;
     prev=p;
   }
@@ -445,7 +448,7 @@ function renderQuads(d){
     for(const p of h){
       let dtH=1/60;
       if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
-      const impR=rateAt(p.t.slice(11,16));
+      const impR=sampleRate(p);
       const expR=rateFor(expRates,new Date(p.t).toISOString())??15;
       const load=Math.max(p.load||0,0), solar=Math.max(p.solar||0,0), exp=Math.max(-(p.grid||0),0);
       homeCost+=load*dtH/1000*impR;
