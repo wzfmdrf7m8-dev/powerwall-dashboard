@@ -1,0 +1,31 @@
+name: deploy-worker
+on:
+  push:
+    paths: ['worker/**', '.github/workflows/deploy.yml']
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install -g wrangler
+      - name: ensure r2 bucket
+        run: wrangler r2 bucket create powerwall-data --config worker/wrangler.toml || true
+      - name: deploy
+        run: wrangler deploy --config worker/wrangler.toml
+      - name: push secrets
+        run: |
+          set -e
+          put() { printf '%s' "$2" | wrangler secret put "$1" --config worker/wrangler.toml; }
+          put TESLA_CLIENT_ID       "${{ secrets.TESLA_CLIENT_ID }}"
+          put TESLA_REFRESH_TOKEN   "${{ secrets.TESLA_REFRESH_TOKEN }}"
+          put DASH_PASSWORD         "${{ secrets.DASH_PASSWORD }}"
+          put OCTOPUS_API_KEY       "${{ secrets.OCTOPUS_API_KEY }}"
+          put OCTOPUS_ACCOUNT       "${{ secrets.OCTOPUS_ACCOUNT }}"
+          put OHME_EMAIL            "${{ secrets.OHME_EMAIL }}"
+          put OHME_PASSWORD         "${{ secrets.OHME_PASSWORD }}"

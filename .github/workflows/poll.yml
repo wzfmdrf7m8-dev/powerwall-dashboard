@@ -1,7 +1,6 @@
 name: poll
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  # schedule disabled — polling now runs on the Cloudflare Worker (worker/)
   workflow_dispatch:
     inputs:
       command:
