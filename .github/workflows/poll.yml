@@ -23,6 +23,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install requests cryptography ohme
+      - run: |
+          git config user.name pw-bot
+          git config user.email pw-bot@users.noreply.github.com
       - name: run
         env:
           TESLA_CLIENT_ID: ${{ secrets.TESLA_CLIENT_ID }}
