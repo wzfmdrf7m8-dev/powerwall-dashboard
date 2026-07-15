@@ -13,7 +13,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install -g wrangler
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm install -g wrangler && pip install cryptography
+      - name: derive dashboard key + current tesla refresh token
+        env:
+          DASH_PASSWORD: ${{ secrets.DASH_PASSWORD }}
+        run: |
+          python - <<'EOF'
+          import base64, os
+          from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+          from cryptography.hazmat.primitives import hashes, padding
+          from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+          pw = os.environ['DASH_PASSWORD'].encode()
+          salt = os.urandom(16)
+          key = PBKDF2HMAC(hashes.SHA256(), 32, salt, 200000).derive(pw)
+          open('salt.b64', 'w').write(base64.b64encode(salt).decode())
+          open('key.b64', 'w').write(base64.b64encode(key).decode())
+          raw = base64.b64decode(open('state/refresh.enc').read())
+          s2, iv, ct = raw[:16], raw[16:32], raw[32:]
+          k2 = PBKDF2HMAC(hashes.SHA256(), 32, s2, 200000).derive(pw)
+          dec = Cipher(algorithms.AES(k2), modes.CBC(iv)).decryptor()
+          padded = dec.update(ct) + dec.finalize()
+          up = padding.PKCS7(128).unpadder()
+          open('rt.txt', 'w').write((up.update(padded) + up.finalize()).decode())
+          EOF
       - name: ensure r2 bucket
         run: wrangler r2 bucket create powerwall-data --config worker/wrangler.toml || true
       - name: deploy
@@ -23,9 +48,12 @@ jobs:
           set -e
           put() { printf '%s' "$2" | wrangler secret put "$1" --config worker/wrangler.toml; }
           put TESLA_CLIENT_ID       "${{ secrets.TESLA_CLIENT_ID }}"
-          put TESLA_REFRESH_TOKEN   "${{ secrets.TESLA_REFRESH_TOKEN }}"
+          put TESLA_REFRESH_TOKEN   "$(cat rt.txt)"
           put DASH_PASSWORD         "${{ secrets.DASH_PASSWORD }}"
+          put DASH_SALT_B64         "$(cat salt.b64)"
+          put DASH_KEY_B64          "$(cat key.b64)"
           put OCTOPUS_API_KEY       "${{ secrets.OCTOPUS_API_KEY }}"
           put OCTOPUS_ACCOUNT       "${{ secrets.OCTOPUS_ACCOUNT }}"
           put OHME_EMAIL            "${{ secrets.OHME_EMAIL }}"
           put OHME_PASSWORD         "${{ secrets.OHME_PASSWORD }}"
+          rm -f rt.txt salt.b64 key.b64
