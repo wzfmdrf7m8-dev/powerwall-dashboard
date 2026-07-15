@@ -300,9 +300,12 @@ async function pollCycle(env, state, opts = {}) {
   const now = Date.now() / 1000;
 
   const live = await tesla(env, state, "GET", `/api/1/energy_sites/${sid}/live_status`);
+  const nowIso = new Date().toISOString();
+  const inIoSlot = (((state.ohmeData || {}).slots) || []).some((sl) => sl.start <= nowIso && nowIso < sl.end);
   state.hist.push({
     t: localMinuteISO(), soc: live.percentage_charged, solar: live.solar_power,
     load: live.load_power, grid: live.grid_power, battery: live.battery_power,
+    ...(inIoSlot ? { io: 1 } : {}),
     ...(state.ohmeData && !state.ohmeData.error ? { ev: (state.ohmeData.power || {}).watts || 0 } : {}),
   });
   // dedupe + trim
