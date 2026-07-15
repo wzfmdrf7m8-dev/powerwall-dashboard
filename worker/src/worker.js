@@ -70,6 +70,8 @@ async function loadState(env) {
   const state = obj ? JSON.parse(await obj.text()) : {};
   state.config = { ...DEFAULT_CONFIG, ...(state.config || {}) };
   state.hist = state.hist || [];
+  // one-time migration (requested 2026-07-15): enable Powerwall follow-Ohme-slots
+  if (!state.mig_fo1) { state.config.follow_ohme_slots = true; state.mig_fo1 = 1; }
   // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
   state.keySalt = env.DASH_SALT_B64;
   state.keyRaw = env.DASH_KEY_B64;
