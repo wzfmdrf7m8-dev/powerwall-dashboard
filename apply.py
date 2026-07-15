@@ -267,7 +267,7 @@ def main():
 
     hist.append(sample(live, now))
     # scheduled runs sample every 60s for ~4 more minutes -> 1-min resolution
-    if COMMAND in ("", "poll"):
+    if COMMAND == "":  # only scheduled runs do the 1-min sampling loop
         for _ in range(4):
             time.sleep(60)
             try:
@@ -282,15 +282,23 @@ def main():
             dedup.append(p)
     hist = dedup[-2880:]  # ~2 days at 1-min cadence
 
-    end_d = now.date() + datetime.timedelta(days=1)
-    start_d = now.date() - datetime.timedelta(days=30)
+    # daily energy: month-period queries return one row per day
+    tzname = cfg.get("timezone", "Europe/London")
+    energy_rows, energy_err = [], None
+
+    def month_series(anchor):
+        r = api(tok, "GET", f"/api/1/energy_sites/{site}/calendar_history", params={
+            "kind": "energy", "period": "month",
+            "end_date": anchor.isoformat(), "time_zone": tzname})
+        return (r or {}).get("time_series", [])
+
     try:
-        energy = api(tok, "GET", f"/api/1/energy_sites/{site}/calendar_history", params={
-            "kind": "energy", "period": "day",
-            "start_date": f"{start_d}T00:00:00Z", "end_date": f"{end_d}T00:00:00Z",
-            "time_zone": cfg.get("timezone", "Europe/London")})
+        prev_month_end = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - datetime.timedelta(seconds=1)
+        energy_rows = month_series(prev_month_end) + month_series(now)
     except Exception as e:
-        energy = {"error": str(e)[:200]}
+        energy_err = str(e)[:300]
+        print("energy_error:", energy_err, file=sys.stderr)
+    energy = {"time_series": energy_rows[-31:]}
 
     # ----- Ohme EV charger (optional, unofficial API) -----
     ohme = None
