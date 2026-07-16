@@ -568,6 +568,12 @@ async function runCommand(env, state, command, value) {
     await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/grid_import_export`,
       { disallow_charge_from_grid_with_solar_installed: value !== "on" });
     log.push(`grid charging -> ${value} (manual)`);
+  } else if (command === "export_rule") {
+    // battery_ok = export everything (solar + Powerwall), pv_only = solar only, never = no export
+    const rule = { everything: "battery_ok", solar: "pv_only", never: "never" }[value] || value;
+    await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/grid_import_export`,
+      { customer_preferred_export_rule: rule });
+    log.push(`export rule -> ${rule} (manual)`);
   } else if (command === "follow_ohme") {
     state.config.follow_ohme_slots = value === "on";
     log.push(`follow ohme slots -> ${value}`);
