@@ -342,6 +342,19 @@ async function pollCycle(env, state, opts = {}) {
     // self-heal intraday chart gaps from Tesla's stored 5-min power history
     try { await backfillHistory(env, state, sid); state.hist = state.hist.slice(-HIST_MAX); }
     catch (e) { log.push("autofill error: " + String(e).slice(0, 120)); }
+    // solar forecast: Open-Meteo irradiance scaled to this system's observed peak
+    try {
+      const si = state.siteInfo || {};
+      const lat = si.latitude ?? 51.5, lon = si.longitude ?? -0.12;
+      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=shortwave_radiation&forecast_days=1&timezone=Europe%2FLondon`);
+      if (r.ok) {
+        const rad = ((await r.json()).hourly || {}).shortwave_radiation || [];
+        let maxSolar = 3000;
+        for (const p of state.hist) if ((p.solar || 0) > maxSolar) maxSolar = p.solar;
+        const k = maxSolar / 900; // ~900 W/m² ≈ observed peak output
+        state.solarForecast = rad.slice(0, 24).map((v, h) => ({ h, w: Math.round(Math.max(0, (v || 0) * k)) }));
+      }
+    } catch (e) {}
   }
   if (env.OCTOPUS_API_KEY && (!state.octopus || now - (state.lastOcto || 0) > 1800 || opts.force)) {
     try { state.octopus = await fetchOctopus(env); state.lastOcto = now; }
@@ -357,6 +370,7 @@ async function pollCycle(env, state, opts = {}) {
       ({ backup_reserve_percent, default_real_mode, installation_date, nameplate_power,
          nameplate_energy, battery_count, user_settings, components }))(state.siteInfo || {}),
     energy_daily: state.energyDaily || [],
+    solar_forecast: state.solarForecast || [],
     history: state.hist,
     automations: state.config,
     log: log.length ? log : (state.lastLog || []),
