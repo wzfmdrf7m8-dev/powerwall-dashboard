@@ -435,13 +435,22 @@ function renderNet(d){
   const n=el('netCost');
   let net=null,label='';
   if(period==='day'){
+    // full-day pricing from minute history (covers hours before the ledger existed)
     const today=(d.generated_at||'').slice(0,10);
-    const g=(d.ledger||{})[today];
+    const h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
     label='Today · live';
-    if(g){
+    if(h.length){
       const expRates=((d.octopus||{}).export||{}).rates||[];
       const expR=rateFor(expRates,new Date().toISOString())??15;
-      net=((g.impOff||0)*TARIFF.offpeak+(g.impPeak||0)*TARIFF.peak-(g.exp||0)*expR)/1000;
+      let cost=0,earn=0,prev=null;
+      for(const p of h){
+        let dtH=1/60;
+        if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
+        cost+=Math.max(p.grid||0,0)*dtH/1000*sampleRate(p);
+        earn+=Math.max(-(p.grid||0),0)*dtH/1000*expR;
+        prev=p;
+      }
+      net=cost-earn;
     }
   }else{
     const [rs,re]=(val('range')||'|').split('|');
