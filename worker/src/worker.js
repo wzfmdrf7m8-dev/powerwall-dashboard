@@ -411,6 +411,31 @@ async function backfillHistory(env, state, sid) {
   state.hist = Object.values(merged).sort((a, b) => (a.t < b.t ? -1 : 1)).slice(-HIST_MAX);
 }
 
+// rebuild a day's cost ledger from the (self-healed) minute/5-min history — used
+// after an outage, when the live per-minute accumulation has holes
+function rebuildLedgerDay(state, dKey) {
+  const rows = state.hist.filter((p) => p.t && p.t.slice(0, 10) === dKey).sort((a, b) => (a.t < b.t ? -1 : 1));
+  if (!rows.length) return false;
+  const day = { impOff: 0, impPeak: 0, basisOff: 0, basisPeak: 0, exp: 0, rebuilt: 1 };
+  for (let i = 0; i < rows.length; i++) {
+    const p = rows[i];
+    let dt = 1 / 60;
+    if (i + 1 < rows.length) {
+      const gap = (Date.parse(rows[i + 1].t + ":00Z") - Date.parse(p.t + ":00Z")) / 36e5;
+      if (gap > 0) dt = Math.min(gap, 1 / 6); // cap at 10 min so big holes don't overweight
+    }
+    const hm = p.t.slice(11, 16);
+    const off = (hm >= "23:30" || hm < "05:30") || p.io || (p.ev || 0) > 250;
+    const imp = Math.max(p.grid || 0, 0), ex = Math.max(-(p.grid || 0), 0);
+    const basis = Math.max(p.load || 0, 0) + Math.max(-(p.battery || 0), 0) + (p.ev || 0);
+    if (off) { day.impOff += imp * dt; day.basisOff += basis * dt; }
+    else { day.impPeak += imp * dt; day.basisPeak += basis * dt; }
+    day.exp += ex * dt;
+  }
+  (state.ledger = state.ledger || {})[dKey] = day;
+  return true;
+}
+
 /* ---------------- poll cycle ---------------- */
 async function pollCycle(env, state, opts = {}) {
   const log = [];
@@ -583,6 +608,11 @@ async function runCommand(env, state, command, value) {
   } else if (command === "backfill") {
     await backfillHistory(env, state, sid);
     log.push(`backfilled (${state.hist.length} samples)`);
+    // rebuild today's + yesterday's cost ledger from the healed history
+    for (const off of [1, 0]) {
+      const dKey = localMinuteISO(new Date(Date.now() - off * 864e5)).slice(0, 10);
+      if (rebuildLedgerDay(state, dKey)) log.push(`ledger rebuilt for ${dKey}`);
+    }
   } // "poll" falls through — cycle below refreshes everything
   state.lastLog = log;
   await pollCycle(env, state, { force: true });
