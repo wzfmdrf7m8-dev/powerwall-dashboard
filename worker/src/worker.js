@@ -576,8 +576,9 @@ export default {
     try { await pollCycle(env, state); }
     catch (e) {
       // log the failure but don't rethrow — avoids alert spam; /health shows lastError
+      console.error("cycle error:", String(e), (e && e.stack || "").slice(0, 500));
       state.lastError = { t: new Date().toISOString(), e: String(e).slice(0, 300) };
-      await saveState(env, state);
+      try { await saveState(env, state); } catch (e2) { console.error("state save failed:", String(e2)); }
     }
   },
 
