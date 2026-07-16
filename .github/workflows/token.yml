@@ -1,0 +1,67 @@
+name: token-install
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: Tesla OAuth authorization code
+        required: true
+permissions:
+  contents: write
+  actions: write
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install cryptography requests
+      - name: exchange code and install encrypted refresh token
+        env:
+          CLIENT_ID: ${{ secrets.TESLA_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.TESLA_CLIENT_SECRET }}
+          DASH_PASSWORD: ${{ secrets.DASH_PASSWORD }}
+          CODE: ${{ github.event.inputs.code }}
+        run: |
+          python - <<'EOF'
+          import base64, os, sys, requests
+          from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+          from cryptography.hazmat.primitives import hashes, padding
+          from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+          r = requests.post('https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token', data={
+              'grant_type': 'authorization_code',
+              'client_id': os.environ['CLIENT_ID'],
+              'client_secret': os.environ['CLIENT_SECRET'],
+              'code': os.environ['CODE'],
+              'audience': 'https://fleet-api.prd.eu.vn.cloud.tesla.com',
+              'redirect_uri': 'https://wzfmdrf7m8-dev.github.io/callback',
+          })
+          j = r.json()
+          rt = j.get('refresh_token')
+          if not rt:
+              print('EXCHANGE FAILED:', {k: v for k, v in j.items() if 'token' not in k})
+              sys.exit(1)
+          pw = os.environ['DASH_PASSWORD'].encode()
+          salt, iv = os.urandom(16), os.urandom(16)
+          key = PBKDF2HMAC(hashes.SHA256(), 32, salt, 200000).derive(pw)
+          pad = padding.PKCS7(128).padder()
+          data = pad.update(rt.encode()) + pad.finalize()
+          enc = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
+          ct = enc.update(data) + enc.finalize()
+          os.makedirs('state', exist_ok=True)
+          open('state/refresh.enc', 'w').write(base64.b64encode(salt + iv + ct).decode())
+          print('EXCHANGE OK — refresh token installed to state/refresh.enc')
+          EOF
+      - name: commit
+        run: |
+          git config user.name pw-bot
+          git config user.email pw-bot@users.noreply.github.com
+          git add state/refresh.enc
+          git commit -m "install fresh tesla refresh token"
+          git pull --rebase origin main || true
+          git push
+      - name: trigger worker deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-worker --repo ${{ github.repository }}
