@@ -135,7 +135,14 @@ async function siteId(env, state) {
 }
 
 /* ---------------- octopus ---------------- */
-async function fetchOctopus(env) {
+function rateAtEpoch(rates, tms) {
+  for (const r of rates || []) {
+    const from = Date.parse(r.valid_from), to = r.valid_to ? Date.parse(r.valid_to) : Infinity;
+    if (from <= tms && tms < to) return r.value_inc_vat;
+  }
+  return null;
+}
+async function fetchOctopus(env, state) {
   const auth = "Basic " + btoa(env.OCTOPUS_API_KEY + ":");
   const get = async (url, params) => {
     const u = new URL(url);
@@ -145,8 +152,18 @@ async function fetchOctopus(env) {
   };
   const acct = await get(`https://api.octopus.energy/v1/accounts/${env.OCTOPUS_ACCOUNT}/`);
   if (!acct) return { error: "octopus account fetch failed" };
-  const start = new Date(Date.now() - 3 * 864e5).toISOString();
+  const start = new Date(Date.now() - 35 * 864e5).toISOString();
+  // half-hours our poller saw as IO-slot/car-charging (billed off-peak on Intelligent Octopus)
+  const ioSet = new Set();
+  for (const p of (state && state.hist) || []) {
+    if (p.io || (p.ev || 0) > 250) {
+      const mm = parseInt(p.t.slice(14, 16), 10) < 30 ? "00" : "30";
+      ioSet.add(p.t.slice(0, 14) + mm);
+    }
+  }
   const out = {};
+  const daily = {};
+  const dayOf = (iso) => localMinuteISO(new Date(Date.parse(iso))).slice(0, 10);
   for (const prop of acct.properties || []) {
     for (const mp of prop.electricity_meter_points || []) {
       const kind = mp.is_export ? "export" : "import";
@@ -159,18 +176,38 @@ async function fetchOctopus(env) {
       let consumption = [], rates = [];
       if (serial) {
         const c = await get(`https://api.octopus.energy/v1/electricity-meter-points/${mp.mpan}/meters/${serial}/consumption/`,
-          { period_from: start, page_size: "200", order_by: "period" });
+          { period_from: start, page_size: "2500", order_by: "period" });
         consumption = (c && c.results) || [];
       }
       if (tariff) {
         const product = tariff.split("-").slice(2, -1).join("-");
         const r = await get(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`,
-          { period_from: start, page_size: "200" });
+          { period_from: start, page_size: "2500" });
         rates = (r && r.results) || [];
       }
-      out[kind] = { mpan: mp.mpan, tariff, consumption, rates };
+      const offRate = rates.length ? Math.min(...rates.map((r) => r.value_inc_vat)) : 5.9;
+      for (const c of consumption) {
+        if (!c.interval_start) continue;
+        const dy = dayOf(c.interval_start);
+        const d = (daily[dy] = daily[dy] || { d: dy, impKwh: 0, impCost: 0, offKwh: 0, peakKwh: 0, expKwh: 0, expEarn: 0 });
+        let rate = rateAtEpoch(rates, Date.parse(c.interval_start));
+        if (kind === "import") {
+          const localKey = localMinuteISO(new Date(Date.parse(c.interval_start))).slice(0, 16);
+          if (ioSet.has(localKey)) rate = offRate; // IO bonus slot repricing
+          if (rate == null) rate = offRate;
+          d.impKwh += c.consumption;
+          d.impCost += c.consumption * rate;
+          if (rate === offRate) d.offKwh += c.consumption; else d.peakKwh += c.consumption;
+        } else {
+          if (rate == null) rate = 15;
+          d.expKwh += c.consumption;
+          d.expEarn += c.consumption * rate;
+        }
+      }
+      out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: rates.slice(-200) };
     }
   }
+  out.daily = Object.keys(daily).sort().map((k) => daily[k]).slice(-40);
   return out;
 }
 
@@ -320,6 +357,23 @@ async function pollCycle(env, state, opts = {}) {
     ...(inIoSlot ? { io: 1 } : {}),
     ...(state.ohmeData && !state.ohmeData.error ? { ev: (state.ohmeData.power || {}).watts || 0 } : {}),
   });
+  // permanent daily ledger: exact off-peak/peak accumulation, minute by minute
+  {
+    const t = hhmm();
+    const evW = (state.ohmeData && !state.ohmeData.error && (state.ohmeData.power || {}).watts) || 0;
+    const off = (t >= "23:30" || t < "05:30") || inIoSlot || evW > 250;
+    const dKey = localMinuteISO().slice(0, 10);
+    const L = (state.ledger = state.ledger || {});
+    const day = (L[dKey] = L[dKey] || { impOff: 0, impPeak: 0, basisOff: 0, basisPeak: 0, exp: 0 });
+    const dt = 1 / 60;
+    const impW = Math.max(live.grid_power || 0, 0), expW = Math.max(-(live.grid_power || 0), 0);
+    const basisW = Math.max(live.load_power || 0, 0) + Math.max(-(live.battery_power || 0), 0) + evW;
+    if (off) { day.impOff += impW * dt; day.basisOff += basisW * dt; }
+    else { day.impPeak += impW * dt; day.basisPeak += basisW * dt; }
+    day.exp += expW * dt;
+    const keys = Object.keys(L).sort();
+    for (const k of keys.slice(0, Math.max(0, keys.length - 92))) delete L[k];
+  }
   // dedupe + trim
   const seen = new Set(); const dedup = [];
   for (const p of state.hist) { const k = (p.t || "").slice(0, 16); if (!seen.has(k)) { seen.add(k); dedup.push(p); } }
@@ -357,7 +411,7 @@ async function pollCycle(env, state, opts = {}) {
     } catch (e) {}
   }
   if (env.OCTOPUS_API_KEY && (!state.octopus || now - (state.lastOcto || 0) > 1800 || opts.force)) {
-    try { state.octopus = await fetchOctopus(env); state.lastOcto = now; }
+    try { state.octopus = await fetchOctopus(env, state); state.lastOcto = now; }
     catch (e) { state.octopus = { error: String(e).slice(0, 150) }; }
   }
 
@@ -371,6 +425,7 @@ async function pollCycle(env, state, opts = {}) {
          nameplate_energy, battery_count, user_settings, components }))(state.siteInfo || {}),
     energy_daily: state.energyDaily || [],
     solar_forecast: state.solarForecast || [],
+    ledger: state.ledger || {},
     history: state.hist,
     automations: state.config,
     log: log.length ? log : (state.lastLog || []),
