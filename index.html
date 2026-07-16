@@ -83,6 +83,10 @@
   </svg>
   <div><h1 id="title">Powerwall</h1><div class="sub" id="updated">locked</div></div>
   <div class="spacer"></div>
+  <div style="text-align:right;margin-right:8px">
+    <div class="sub" id="netLbl">Billing month (from 15th)</div>
+    <div id="netCost" style="font-size:26px;font-weight:750;font-variant-numeric:tabular-nums">–</div>
+  </div>
   <div class="sub" id="modeline"></div>
   <button class="sec" style="font-size:12px;padding:5px 12px" onclick="lockNow()">Lock</button>
 </header>
@@ -138,7 +142,8 @@
   <div class="card quad">
     <h3><span style="color:var(--pink)">Grid</span><span class="qstatus" id="q_grid_status"></span></h3>
     <div class="nums"><div class="now" id="q_grid_now">–<small>kW</small></div>
-      <div><div class="tot" id="q_grid_tot">–<small>kWh</small></div><div class="totlbl">Net used</div></div></div>
+      <div><div class="tot" id="q_grid_tot">–<small>kWh</small></div><div class="totlbl">Net used</div>
+      <div class="totlbl" id="q_grid_exp" style="color:var(--mint);font-weight:600"></div></div></div>
     <canvas id="q_grid" height="110"></canvas>
   </div>
 </div>
@@ -409,14 +414,45 @@ function renderOhme(o){
 function mkQuad(canvasId,labels,series,type){
   quadCharts[canvasId]&&quadCharts[canvasId].destroy();
   quadCharts[canvasId]=new Chart(el(canvasId),{type:type||'line',data:{labels,datasets:series.map(s=>({
-    label:s.label,data:s.data,borderColor:s.color,borderWidth:1.8,
+    label:s.label,data:s.data,borderColor:s.color,borderWidth:s.dash?1.4:1.8,borderDash:s.dash||undefined,
     backgroundColor:s.color.replace('rgb','rgba').replace(')',type==='bar'?',.85)':',.18)'),
-    fill:type==='bar'?undefined:'origin',pointRadius:0,tension:.3,spanGaps:false,borderRadius:type==='bar'?4:0}))},
+    fill:s.dash?false:(type==='bar'?undefined:'origin'),pointRadius:0,tension:.3,spanGaps:!!s.dash,borderRadius:type==='bar'?4:0}))},
     options:{animation:false,scales:{
       y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4}},
       x:{ticks:{maxTicksLimit:6,color:'#6e6e73'},grid:{display:false}}},
       plugins:{legend:{display:series.length>1,labels:{color:'#6e6e73',boxWidth:10}}},
       interaction:{intersect:false,mode:'index'}}});
+}
+function billingStart(){
+  const n=new Date(),y=n.getFullYear(),m=n.getMonth();
+  const s=n.getDate()>=15?new Date(Date.UTC(y,m,15)):new Date(Date.UTC(y,m-1,15));
+  return s.toISOString().slice(0,10);
+}
+function offpeakShare(d){
+  let offWh=0,totWh=0,pv=null;
+  for(const p of (d.history||[])){
+    let dtH=1/60;
+    if(pv&&pv.t){const dt=(new Date(p.t)-new Date(pv.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
+    const wh=Math.max(p.load||0,0)*dtH;
+    totWh+=wh; if(sampleOffpeak(p)) offWh+=wh;
+    pv=p;
+  }
+  return totWh>0?offWh/totWh:0;
+}
+function renderNet(d){
+  const e=(d.energy_daily||[]).filter(r=>r.timestamp&&r.timestamp.slice(0,10)>=billingStart());
+  const expRates=((d.octopus||{}).export||{}).rates||[];
+  const expR=rateFor(expRates,new Date().toISOString())??15;
+  const share=offpeakShare(d);
+  const blended=share*TARIFF.offpeak+(1-share)*TARIFF.peak;
+  const imp=e.reduce((a,r)=>a+(r.grid_energy_imported||0),0)/1000;
+  const exp=e.reduce((a,r)=>a+(r.grid_energy_exported_from_solar||0)+(r.grid_energy_exported_from_battery||0),0)/1000;
+  const net=imp*blended-exp*expR;
+  const n=el('netCost');
+  if(!e.length){n.textContent='–';return}
+  n.textContent=(net<0?'−':'')+gbp(Math.abs(net));
+  n.style.color=net<=0?'var(--mint)':'var(--pink)';
+  el('netLbl').textContent='Billing month from '+billingStart().slice(8,10)+'/'+billingStart().slice(5,7)+' · net '+(net<=0?'credit':'cost');
 }
 function renderQuads(d){
   const period=val('period');
@@ -448,12 +484,15 @@ function renderQuads(d){
       let dtH=1/60;
       if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
       const expR=rateFor(expRates,new Date(p.t).toISOString())??15;
-      homeCost+=Math.max(p.load||0,0)*dtH/1000*sampleRate(p);
+      const basis=Math.max(p.load||0,0)+Math.max(-(p.battery||0),0)+Math.max(p.ev||0,0);
+      homeCost+=basis*dtH/1000*sampleRate(p);
       solarVal+=Math.max(p.solar||0,0)*dtH/1000*expR;
       prev=p;
     }
-    el('q_home_cost').textContent=h.length?'≈ '+gbp(homeCost)+' cost':'';
+    el('q_home_cost').textContent=h.length?'≈ '+gbp(homeCost)+' inc. Powerwall & EV':'';
     el('q_solar_val').textContent=h.length?'≈ '+gbp(solarVal)+' at export rate':'';
+    const dayExp=e.length?((t.grid_energy_exported_from_solar||0)+(t.grid_energy_exported_from_battery||0)):null;
+    el('q_grid_exp').textContent=dayExp!=null?'↑ '+(dayExp/1000).toFixed(1)+' kWh exported (solar + Powerwall)':'';
     // full 24h axis: bucket samples into 15-min bins, gaps where no data
     const labels=[],mk=()=>Array(96).fill(null),sums={},cnts={};
     for(let i=0;i<96;i++) labels.push(String(Math.floor(i/4)).padStart(2,'0')+':'+String((i%4)*15).padStart(2,'0'));
@@ -468,7 +507,14 @@ function renderQuads(d){
     el('q_home_tot').innerHTML=kwhv(e.length?homeOf(t):null)+'<small>kWh</small>';
     el('q_batt_tot').innerHTML=kwhv(t.battery_energy_exported)+'<small>kWh</small>';
     el('q_grid_tot').innerHTML=kwhv(e.length?netOf(t):null)+'<small>kWh</small>';
-    mkQuad('q_solar',labels,[{label:'Solar kW',data:series('solar'),color:'rgb(255,149,0)'}]);
+    const solarSeries=[{label:'Solar kW',data:series('solar'),color:'rgb(255,149,0)'}];
+    const fc=d.solar_forecast||[];
+    if(fc.length){
+      const est=Array(96).fill(null);
+      for(const f of fc){for(let q=0;q<4;q++){const i=f.h*4+q;if(i<96)est[i]=(f.w||0)/1000}}
+      solarSeries.push({label:'Estimate kW',data:est,color:'rgb(255,149,0)',dash:[4,4]});
+    }
+    mkQuad('q_solar',labels,solarSeries);
     const hasEv=h.some(p=>p.ev>50);
     el('q_ev_lbl').innerHTML=hasEv?'/ <span style="color:var(--violet)">Vehicle</span>':'';
     const hs=[{label:'Home kW',data:series('load'),color:'rgb(0,122,255)'}];
@@ -477,27 +523,21 @@ function renderQuads(d){
     mkQuad('q_batt',labels,[{label:'Powerwall kW',data:series('battery'),color:'rgb(52,199,89)'}]);
     mkQuad('q_grid',labels,[{label:'Grid kW',data:series('grid'),color:'rgb(255,59,48)'}]);
   }else{
-    const n=period==='week'?7:30;
-    const rows=e.slice(-n);
+    // week = last 7 days; month = Octopus billing period (15th → today)
+    const rows=period==='week'?e.slice(-7):e.filter(r=>r.timestamp.slice(0,10)>=billingStart());
     const labels=rows.map(r=>r.timestamp.slice(5,10));
     const sum=f=>rows.length?rows.reduce((a,r)=>a+(f(r)||0),0):null;
     // period £: solar = kWh × export rate; home = kWh × blended tariff
     // (off-peak share measured from recent minute-level history)
     const expRates=((d.octopus||{}).export||{}).rates||[];
     const expR=rateFor(expRates,new Date().toISOString())??15;
-    let offWh=0,totWh=0,pv=null;
-    for(const p of (d.history||[])){
-      let dtH=1/60;
-      if(pv&&pv.t){const dt=(new Date(p.t)-new Date(pv.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
-      const wh=Math.max(p.load||0,0)*dtH;
-      totWh+=wh; if(sampleOffpeak(p)) offWh+=wh;
-      pv=p;
-    }
-    const share=totWh>0?offWh/totWh:0;
+    const share=offpeakShare(d);
     const blended=share*TARIFF.offpeak+(1-share)*TARIFF.peak;
     const sumSolar=sum(r=>r.solar_energy_exported), sumHome=sum(homeOf);
+    const sumExp=sum(r=>(r.grid_energy_exported_from_solar||0)+(r.grid_energy_exported_from_battery||0));
     el('q_solar_val').textContent=sumSolar!=null?'≈ '+gbp(sumSolar/1000*expR)+' at export rate':'';
     el('q_home_cost').textContent=sumHome!=null?'≈ '+gbp(sumHome/1000*blended)+' at blended tariff':'';
+    el('q_grid_exp').textContent=sumExp!=null?'↑ '+(sumExp/1000).toFixed(1)+' kWh exported (solar + Powerwall)':'';
     el('q_solar_tot').innerHTML=kwhv(sum(r=>r.solar_energy_exported))+'<small>kWh</small>';
     el('q_home_tot').innerHTML=kwhv(sum(homeOf))+'<small>kWh</small>';
     el('q_batt_tot').innerHTML=kwhv(sum(r=>r.battery_energy_exported))+'<small>kWh</small>';
@@ -515,6 +555,7 @@ function render(d){
   el('title').textContent=d.site_name||'Powerwall';
   el('updated').textContent='Updated '+new Date(d.generated_at).toLocaleString();
   const L=d.live||{};
+  renderNet(d);
   renderQuads(d);
   renderFlow(L);
   renderOcto(d.octopus);
