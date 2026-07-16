@@ -79,6 +79,9 @@ async function loadState(env) {
   if (!state.mig_fo1) { state.config.follow_ohme_slots = true; state.mig_fo1 = 1; }
   // one-time migration (requested 2026-07-16): grid charging always allowed
   if (!state.mig_gc1) { state.config.day = { ...(state.config.day || {}), allow_grid_charging: true }; state.mig_gc1 = 1; }
+  // one-time migration (2026-07-17): re-run the Octopus deep fill so cached daily
+  // rows gain standing charges; also refetch immediately rather than in 30 min
+  if (!state.mig_std1) { state.octoDeepFill = 0; state.lastOcto = 0; state.mig_std1 = 1; }
   // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
   state.keySalt = env.DASH_SALT_B64;
   state.keyRaw = env.DASH_KEY_B64;
