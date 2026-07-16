@@ -309,20 +309,34 @@ async function fetchEnergyDaily(env, state, sid) {
     return (r || {}).time_series || [];
   };
   const now = new Date();
-  const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-  const prev2MonthEnd = new Date(now.getFullYear(), now.getMonth() - 1, 0, 23, 59, 59);
-  const rows = [...await monthSeries(prev2MonthEnd), ...await monthSeries(prevMonthEnd), ...await monthSeries(now)];
-  // Tesla may return sub-daily rows — aggregate to one total per calendar day
-  const byDay = {};
+  let rows = [
+    ...await monthSeries(new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)),
+    ...await monthSeries(now),
+  ];
+  // one-off deep fill: 12 months of daily history, then cached in state
+  if (!state.energyDeepFill) {
+    for (let mBack = 2; mBack <= 12; mBack++) {
+      try {
+        rows = rows.concat(await monthSeries(new Date(now.getFullYear(), now.getMonth() - mBack + 1, 0, 23, 59, 59)));
+      } catch (e) {}
+    }
+    state.energyDeepFill = 1;
+  }
+  // Tesla may return sub-daily rows — aggregate freshly fetched rows per day
+  const fresh = {};
   for (const r of rows) {
     const day = (r.timestamp || "").slice(0, 10);
     if (!day) continue;
-    const o = (byDay[day] = byDay[day] || { timestamp: day + "T00:00:00" });
+    const o = (fresh[day] = fresh[day] || { timestamp: day + "T00:00:00" });
     for (const [k, v] of Object.entries(r)) {
       if (typeof v === "number") o[k] = (o[k] || 0) + v;
     }
   }
-  return Object.keys(byDay).sort().map((k) => byDay[k]).slice(-92);
+  // merge: cached daily rows, overwritten by fresh aggregates
+  const byDay = {};
+  for (const r of state.energyDaily || []) if (r.timestamp) byDay[r.timestamp.slice(0, 10)] = r;
+  Object.assign(byDay, fresh);
+  return Object.keys(byDay).sort().map((k) => byDay[k]).slice(-370);
 }
 async function backfillHistory(env, state, sid) {
   const merged = {};
