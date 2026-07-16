@@ -492,13 +492,11 @@ function populateRange(period){
   const iso=d=>d.toISOString().slice(0,10);
   const lbl=d=>d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',timeZone:'UTC'});
   if(period==='day'){
-    // each day of the current billing month (15th → today), newest first
-    const bs=billingStart();
+    // last 31 days, newest first
     const dlbl=d=>d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short',timeZone:'UTC'});
-    for(let i=0;i<32;i++){
-      const d0=new Date(Date.now()-i*864e5),k=iso(d0);
-      if(k<bs)break;
-      add(k,i===0?'Today':dlbl(d0));
+    for(let i=0;i<31;i++){
+      const d0=new Date(Date.now()-i*864e5);
+      add(iso(d0),i===0?'Today':dlbl(d0));
     }
   }else if(period==='month'){
     const bs=new Date(billingStart()+'T00:00:00Z');
