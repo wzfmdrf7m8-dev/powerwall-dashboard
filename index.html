@@ -430,16 +430,30 @@ function billingStart(){
   return s.toISOString().slice(0,10);
 }
 function renderNet(d){
-  // direct: Octopus half-hourly consumption × actual rates (IO slots repriced off-peak)
-  const rows=((d.octopus||{}).daily||[]).filter(r=>r.d>=billingStart());
+  // follows the selected view: Today = live minute ledger; Week/Month = Octopus metered
+  const period=val('period');
   const n=el('netCost');
-  if(!rows.length){n.textContent='–';return}
-  const cost=rows.reduce((a,r)=>a+(r.impCost||0),0);
-  const earn=rows.reduce((a,r)=>a+(r.expEarn||0),0);
-  const net=cost-earn;
+  let net=null,label='';
+  if(period==='day'){
+    const today=(d.generated_at||'').slice(0,10);
+    const g=(d.ledger||{})[today];
+    label='Today · live';
+    if(g){
+      const expRates=((d.octopus||{}).export||{}).rates||[];
+      const expR=rateFor(expRates,new Date().toISOString())??15;
+      net=((g.impOff||0)*TARIFF.offpeak+(g.impPeak||0)*TARIFF.peak-(g.exp||0)*expR)/1000;
+    }
+  }else{
+    const [rs,re]=(val('range')||'|').split('|');
+    const rows=((d.octopus||{}).daily||[]).filter(r=>r.d>=rs&&r.d<re);
+    const sel=el('range');
+    label=(sel.selectedOptions[0]?sel.selectedOptions[0].textContent:'')+' · metered';
+    if(rows.length) net=rows.reduce((a,r)=>a+(r.impCost||0),0)-rows.reduce((a,r)=>a+(r.expEarn||0),0);
+  }
+  if(net==null){n.textContent='–';n.style.color='var(--dim)';el('netLbl').textContent=label+' · no metered data';return}
   n.textContent=(net<0?'−':'')+gbp(Math.abs(net));
   n.style.color=net<=0?'var(--mint)':'var(--pink)';
-  el('netLbl').textContent='Billing month from '+billingStart().slice(8,10)+'/'+billingStart().slice(5,7)+' · metered · net '+(net<=0?'credit':'cost');
+  el('netLbl').textContent=label+' · net '+(net<=0?'credit':'cost');
 }
 function populateRange(period){
   const sel=el('range');
@@ -566,6 +580,7 @@ function renderQuads(d){
     mkQuad('q_batt',labels,[{label:'Discharged kWh/day',data:rows.map(r=>(r.battery_energy_exported||0)/1000),color:'rgb(52,199,89)'}],'bar');
     mkQuad('q_grid',labels,[{label:'Net grid kWh/day',data:rows.map(r=>netOf(r)/1000),color:'rgb(255,59,48)'}],'bar');
   }
+  renderNet(d);
 }
 
 function render(d){
@@ -573,7 +588,6 @@ function render(d){
   el('title').textContent=d.site_name||'Powerwall';
   el('updated').textContent='Updated '+new Date(d.generated_at).toLocaleString();
   const L=d.live||{};
-  renderNet(d);
   renderQuads(d);
   renderFlow(L);
   renderOcto(d.octopus);
