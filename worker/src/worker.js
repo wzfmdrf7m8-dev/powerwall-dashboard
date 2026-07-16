@@ -197,7 +197,7 @@ async function fetchOctopus(env, state) {
       let consumption = [], rates = [], standing = [];
       if (serial) {
         consumption = await getAll(`https://api.octopus.energy/v1/electricity-meter-points/${mp.mpan}/meters/${serial}/consumption/`,
-          { period_from: start, page_size: "10000", order_by: "period" });
+          { period_from: start, page_size: "20000", order_by: "period" });
       }
       if (tariff) {
         const product = tariff.split("-").slice(2, -1).join("-");
@@ -424,11 +424,13 @@ async function pollCycle(env, state, opts = {}) {
     for (const k of keys.slice(0, Math.max(0, keys.length - 400))) delete L[k];
   }
   // background ledger reconstruction: fill past days from Tesla's 5-min power history
-  if (!state.ledgerFillDone) {
+  // (skipped on ticks doing other heavy work, to stay under subrequest limits)
+  const heavyTick = !state.octoDeepFill || !state.energyDeepFill;
+  if (!state.ledgerFillDone && !heavyTick) {
     try {
       state.ledgerFillCursor = state.ledgerFillCursor ?? 2;
       let n = 0;
-      while (n < 12 && state.ledgerFillCursor <= 370) {
+      while (n < 8 && state.ledgerFillCursor <= 370) {
         const d = new Date(Date.now() - state.ledgerFillCursor * 864e5);
         const dKey = londonDayEndISO(d).slice(0, 10);
         if (!(state.ledger || {})[dKey]) {
@@ -492,9 +494,16 @@ async function pollCycle(env, state, opts = {}) {
       }
     } catch (e) {}
   }
-  if (env.OCTOPUS_API_KEY && (!state.octopus || now - (state.lastOcto || 0) > 1800 || opts.force)) {
+  if (env.OCTOPUS_API_KEY && (!state.octopus || !state.octoDeepFill || now - (state.lastOcto || 0) > 1800 || opts.force)) {
     try { state.octopus = await fetchOctopus(env, state); state.lastOcto = now; }
-    catch (e) { state.octopus = { error: String(e).slice(0, 150) }; }
+    catch (e) {
+      // keep the previous good data; note the error; retry in 5 min, not every tick
+      const msg = String(e).slice(0, 150);
+      if (state.octopus && state.octopus.daily) state.octopus.error = msg;
+      else state.octopus = { error: msg };
+      state.lastOcto = now - 1500;
+      log.push("octopus error: " + msg.slice(0, 80));
+    }
   }
 
   const bundle = {
@@ -566,9 +575,9 @@ export default {
     const state = await loadState(env);
     try { await pollCycle(env, state); }
     catch (e) {
+      // log the failure but don't rethrow — avoids alert spam; /health shows lastError
       state.lastError = { t: new Date().toISOString(), e: String(e).slice(0, 300) };
       await saveState(env, state);
-      throw e;
     }
   },
 
