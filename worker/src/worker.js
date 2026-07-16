@@ -503,6 +503,38 @@ async function pollCycle(env, state, opts = {}) {
       if (state.ledgerFillCursor > 370) state.ledgerFillDone = 1;
     } catch (e) { log.push("ledgerfill error: " + String(e).slice(0, 100)); }
   }
+  // per-day 15-min bins for the dashboard day picker: one-off fill of the past
+  // 31 days from Tesla's stored 5-min history (recent days come from hist below)
+  if (!state.dayBinsFillDone && state.ledgerFillDone && !heavyTick) {
+    try {
+      state.dayBins = state.dayBins || {};
+      state.dayBinsCursor = state.dayBinsCursor ?? 2;
+      let n = 0;
+      while (n < 6 && state.dayBinsCursor <= 31) {
+        const d = new Date(Date.now() - state.dayBinsCursor * 864e5);
+        const dKey = londonDayEndISO(d).slice(0, 10);
+        if (!state.dayBins[dKey]) {
+          const r = await tesla(env, state, "GET", `/api/1/energy_sites/${sid}/calendar_history`, null,
+            { kind: "power", period: "day", end_date: londonDayEndISO(d), time_zone: TZ });
+          const sums = Array(96).fill(null), cnt = Array(96).fill(0);
+          for (const row of (r || {}).time_series || []) {
+            const ts = row.timestamp || "";
+            const idx = parseInt(ts.slice(11, 13), 10) * 4 + Math.floor(parseInt(ts.slice(14, 16), 10) / 15);
+            if (!(idx >= 0 && idx < 96)) continue;
+            const b = (sums[idx] = sums[idx] || [0, 0, 0, 0, 0]);
+            const so = row.solar_power || 0, ba = row.battery_power || 0, gr = row.grid_power || 0;
+            b[0] += so; b[1] += row.load_power != null ? row.load_power : so + ba + gr;
+            b[2] += gr; b[3] += ba; cnt[idx]++;
+          }
+          if (cnt.some((c) => c > 0))
+            state.dayBins[dKey] = sums.map((b, i) => (b && cnt[i] ? b.map((v) => Math.round(v / cnt[i])) : null));
+          n++;
+        }
+        state.dayBinsCursor++;
+      }
+      if (state.dayBinsCursor > 31) state.dayBinsFillDone = 1;
+    } catch (e) { log.push("daybins error: " + String(e).slice(0, 100)); }
+  }
   // dedupe + trim
   const seen = new Set(); const dedup = [];
   for (const p of state.hist) { const k = (p.t || "").slice(0, 16); if (!seen.has(k)) { seen.add(k); dedup.push(p); } }
@@ -525,6 +557,26 @@ async function pollCycle(env, state, opts = {}) {
     // self-heal intraday chart gaps from Tesla's stored 5-min power history
     try { await backfillHistory(env, state, sid); state.hist = state.hist.slice(-HIST_MAX); }
     catch (e) { log.push("autofill error: " + String(e).slice(0, 120)); }
+    // refresh per-day bins for the days covered by the minute history (incl. ev)
+    try {
+      const bins = (state.dayBins = state.dayBins || {});
+      const sums = {}, cnts = {};
+      for (const p of state.hist) {
+        if (!p.t) continue;
+        const dk = p.t.slice(0, 10);
+        const idx = parseInt(p.t.slice(11, 13), 10) * 4 + Math.floor(parseInt(p.t.slice(14, 16), 10) / 15);
+        if (!(idx >= 0 && idx < 96)) continue;
+        const S = (sums[dk] = sums[dk] || Array(96).fill(null));
+        const C = (cnts[dk] = cnts[dk] || Array(96).fill(0));
+        const b = (S[idx] = S[idx] || [0, 0, 0, 0, 0]);
+        b[0] += p.solar || 0; b[1] += p.load || 0; b[2] += p.grid || 0; b[3] += p.battery || 0; b[4] += p.ev || 0;
+        C[idx]++;
+      }
+      for (const dk of Object.keys(sums))
+        bins[dk] = sums[dk].map((b, i) => (b && cnts[dk][i] ? b.map((v) => Math.round(v / cnts[dk][i])) : null));
+      const keys = Object.keys(bins).sort();
+      for (const k of keys.slice(0, Math.max(0, keys.length - 35))) delete bins[k];
+    } catch (e) {}
     // solar forecast: Open-Meteo irradiance scaled to this system's observed peak
     try {
       const si = state.siteInfo || {};
@@ -561,6 +613,7 @@ async function pollCycle(env, state, opts = {}) {
          nameplate_energy, battery_count, user_settings, components }))(state.siteInfo || {}),
     energy_daily: state.energyDaily || [],
     solar_forecast: state.solarForecast || [],
+    day_bins: state.dayBins || {},
     ledger: state.ledger || {},
     history: state.hist,
     automations: state.config,
