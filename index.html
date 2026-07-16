@@ -100,6 +100,7 @@
     <button onclick="cmd('mode',val('mode'))">Set mode</button>
     <button onclick="cmd('storm','on')">Storm on</button><button class="sec" onclick="cmd('storm','off')">Storm off</button>
     <button onclick="cmd('grid_charging','on')">Allow grid charging</button><button class="sec" onclick="cmd('grid_charging','off')">Block grid charging</button>
+    <button onclick="cmd('export_rule','everything')">Export: everything (solar + PW)</button><button class="sec" onclick="cmd('export_rule','solar')">Export: solar only</button>
     <button class="sec" onclick="cmd('poll','')">Refresh now</button>
     <button class="sec" onclick="cmd('backfill','')">Backfill history</button>
   </div>
@@ -610,7 +611,9 @@ function render(d){
   renderOcto(d.octopus);
   renderOhme(d.ohme);
   const si=d.site_info||{};
-  el('modeline').textContent=`reserve ${si.backup_reserve_percent??'–'}% · ${si.default_real_mode||'–'} · storm watch ${((si.user_settings||{}).storm_mode_enabled?'on':'off')}`;
+  const xr=((si.components||{}).customer_preferred_export_rule)||'?';
+  const xrTxt={battery_ok:'everything',pv_only:'SOLAR ONLY',never:'NEVER'}[xr]||xr;
+  el('modeline').textContent=`reserve ${si.backup_reserve_percent??'–'}% · ${si.default_real_mode||'–'} · storm watch ${((si.user_settings||{}).storm_mode_enabled?'on':'off')} · export: ${xrTxt}`;
   const a=d.automations||{};
   let html='<span class="pill">'+(a.enabled?'automation on':'automation off — monitoring only')+'</span>';
   if(a.enabled&&a.cheap_window&&a.cheap_window.enabled) html+='<span class="pill">cheap window '+a.cheap_window.start+'–'+a.cheap_window.end+'</span>';
