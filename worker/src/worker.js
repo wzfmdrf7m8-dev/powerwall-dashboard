@@ -19,13 +19,14 @@ const DEFAULT_CONFIG = {
 };
 
 /* ---------------- time helpers ---------------- */
+// hoisted: constructing Intl.DateTimeFormat per call burns the Worker CPU budget
+const LONDON_FMT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+});
 function londonParts(d = new Date()) {
-  const fmt = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  });
   const p = {};
-  for (const { type, value } of fmt.formatToParts(d)) p[type] = value;
+  for (const { type, value } of LONDON_FMT.formatToParts(d)) p[type] = value;
   if (p.hour === "24") p.hour = "00";
   return p;
 }
@@ -177,9 +178,18 @@ async function fetchOctopus(env, state) {
   };
   const acct = await get(`https://api.octopus.energy/v1/accounts/${env.OCTOPUS_ACCOUNT}/`);
   if (!acct) return { error: "octopus account fetch failed" };
-  // deep fill: one-off pull of a full year of half-hourly data, then 35-day top-ups
+  // deep fill: pull the past year in 45-day chunks (one per tick — a whole year of
+  // half-hourly rows in one invocation exceeds the Worker CPU limit), then 35-day top-ups
   const deep = !(state && state.octoDeepFill);
-  const start = new Date(Date.now() - (deep ? 370 : 35) * 864e5).toISOString();
+  let chunkEnd = null;
+  let start;
+  if (deep) {
+    const cur = (state.octoFillCursor = state.octoFillCursor ?? 370); // days ago, counts down
+    start = new Date(Date.now() - cur * 864e5).toISOString();
+    chunkEnd = new Date(Date.now() - Math.max(0, cur - 45) * 864e5).toISOString();
+  } else {
+    start = new Date(Date.now() - 35 * 864e5).toISOString();
+  }
   // half-hours our poller saw as IO-slot/car-charging (billed off-peak on Intelligent Octopus)
   const ioSet = new Set();
   for (const p of (state && state.hist) || []) {
@@ -203,7 +213,7 @@ async function fetchOctopus(env, state) {
       let consumption = [], rates = [], standing = [];
       if (serial) {
         consumption = await getAll(`https://api.octopus.energy/v1/electricity-meter-points/${mp.mpan}/meters/${serial}/consumption/`,
-          { period_from: start, page_size: "20000", order_by: "period" });
+          { period_from: start, page_size: "20000", order_by: "period", ...(chunkEnd ? { period_to: chunkEnd } : {}) });
       }
       if (tariff) {
         const product = tariff.split("-").slice(2, -1).join("-");
@@ -219,11 +229,12 @@ async function fetchOctopus(env, state) {
       const offRate = rates.length ? Math.min(...rates.map((r) => r.value_inc_vat)) : 5.9;
       for (const c of consumption) {
         if (!c.interval_start) continue;
-        const dy = dayOf(c.interval_start);
+        const lm = localMinuteISO(new Date(Date.parse(c.interval_start))); // once per row
+        const dy = lm.slice(0, 10);
         const d = (daily[dy] = daily[dy] || { d: dy, impKwh: 0, impCost: 0, offKwh: 0, peakKwh: 0, expKwh: 0, expEarn: 0 });
         let rate = rateAtEpoch(rates, Date.parse(c.interval_start));
         if (kind === "import") {
-          const localKey = localMinuteISO(new Date(Date.parse(c.interval_start))).slice(0, 16);
+          const localKey = lm.slice(0, 16);
           if (ioSet.has(localKey)) rate = offRate; // IO bonus slot repricing
           if (rate == null) rate = offRate;
           d.impKwh += c.consumption;
@@ -248,7 +259,10 @@ async function fetchOctopus(env, state) {
   for (const r of ((state && state.octopus) || {}).daily || []) merged[r.d] = r;
   Object.assign(merged, daily);
   out.daily = Object.keys(merged).sort().map((k) => merged[k]).slice(-370);
-  if (state && deep) state.octoDeepFill = 1;
+  if (state && deep) {
+    state.octoFillCursor = Math.max(35, (state.octoFillCursor ?? 370) - 45);
+    if (state.octoFillCursor <= 35) { state.octoDeepFill = 1; delete state.octoFillCursor; }
+  }
   return out;
 }
 
