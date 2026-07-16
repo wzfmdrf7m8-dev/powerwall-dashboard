@@ -98,7 +98,10 @@ async function saveState(env, state) {
 async function teslaToken(env, state) {
   const now = Date.now() / 1000;
   if (state.access_token && (state.access_exp || 0) > now + 600) return state.access_token;
-  const candidates = [state.refresh_token, env.TESLA_REFRESH_TOKEN].filter(Boolean);
+  // candidates: state copy, tiny R2 mirror (survives failed state saves), deploy-time secret
+  let mirror = null;
+  try { const o = await env.PW.get("refresh_token.txt"); if (o) mirror = (await o.text()).trim(); } catch (e) {}
+  const candidates = [...new Set([state.refresh_token, mirror, env.TESLA_REFRESH_TOKEN].filter(Boolean))];
   let lastErr = "no refresh token candidates";
   for (const rt of candidates) {
     const r = await fetch(TESLA_TOKEN_URL, {
@@ -111,7 +114,10 @@ async function teslaToken(env, state) {
       state.access_token = j.access_token;
       state.access_exp = now + (j.expires_in || 28800);
       state.refresh_token = j.refresh_token;
-      await saveState(env, state); // persist rotation immediately
+      // persist the rotated token FIRST to a tiny dedicated key (a failed multi-MB
+      // state save must never orphan a single-use token again), then the full state
+      try { await env.PW.put("refresh_token.txt", j.refresh_token); } catch (e) {}
+      await saveState(env, state);
       return state.access_token;
     }
     lastErr = JSON.stringify(j).slice(0, 200);
@@ -524,8 +530,10 @@ async function pollCycle(env, state, opts = {}) {
     ohme: state.ohmeData || null,
     source: "cloudflare-worker",
   };
-  await env.PW.put("dashboard.enc", await encryptBundle(state, bundle));
+  const enc = await encryptBundle(state, bundle);
+  await env.PW.put("dashboard.enc", enc);
   await saveState(env, state);
+  console.log("wrote dashboard.enc", enc.length, "chars,", state.hist.length, "samples");
   return log;
 }
 
@@ -590,7 +598,9 @@ export default {
       const obj = await env.PW.get("dashboard.enc");
       if (!obj) return new Response("no data yet", { status: 404, headers: CORS });
       return new Response(await obj.text(), {
-        headers: { ...CORS, "Content-Type": "text/plain", "Cache-Control": "no-store" },
+        headers: { ...CORS, "Content-Type": "text/plain", "Cache-Control": "no-store",
+          "x-updated": (obj.uploaded ? new Date(obj.uploaded).toISOString() : ""),
+          "Access-Control-Expose-Headers": "x-updated" },
       });
     }
     if (url.pathname === "/health") {
