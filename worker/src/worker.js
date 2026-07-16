@@ -188,7 +188,7 @@ async function fetchOctopus(env, state) {
       for (const ag of mp.agreements || []) {
         if (!ag.valid_to || ag.valid_to > new Date().toISOString()) tariff = ag.tariff_code;
       }
-      let consumption = [], rates = [];
+      let consumption = [], rates = [], standing = [];
       if (serial) {
         consumption = await getAll(`https://api.octopus.energy/v1/electricity-meter-points/${mp.mpan}/meters/${serial}/consumption/`,
           { period_from: start, page_size: "10000", order_by: "period" });
@@ -197,6 +197,12 @@ async function fetchOctopus(env, state) {
         const product = tariff.split("-").slice(2, -1).join("-");
         rates = await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`,
           { period_from: start, page_size: "1500" });
+        if (kind === "import") {
+          standing = await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standing-charges/`,
+            { period_from: start, page_size: "1500" });
+          out.standing_now = rateAtEpoch(standing, Date.now()) ?? 0;
+          out._standing = standing;
+        }
       }
       const offRate = rates.length ? Math.min(...rates.map((r) => r.value_inc_vat)) : 5.9;
       for (const c of consumption) {
@@ -220,6 +226,11 @@ async function fetchOctopus(env, state) {
       out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: rates.slice(-200) };
     }
   }
+  // per-day standing charge from the dated tariff schedule
+  for (const k of Object.keys(daily)) {
+    daily[k].standing = rateAtEpoch(out._standing || [], Date.parse(k + "T12:00:00Z")) ?? (out.standing_now || 0);
+  }
+  delete out._standing;
   // merge with previously cached daily costs, fresh values win
   const merged = {};
   for (const r of ((state && state.octopus) || {}).daily || []) merged[r.d] = r;
