@@ -150,9 +150,24 @@ async function fetchOctopus(env, state) {
     const r = await fetch(u, { headers: { Authorization: auth } });
     return r.ok ? r.json() : null;
   };
+  const getAll = async (url, params) => {
+    let results = [];
+    let u = new URL(url);
+    for (const [k, v] of Object.entries(params || {})) u.searchParams.set(k, v);
+    for (let i = 0; i < 8 && u; i++) {
+      const r = await fetch(u, { headers: { Authorization: auth } });
+      if (!r.ok) break;
+      const j = await r.json();
+      results = results.concat(j.results || []);
+      u = j.next ? new URL(j.next) : null;
+    }
+    return results;
+  };
   const acct = await get(`https://api.octopus.energy/v1/accounts/${env.OCTOPUS_ACCOUNT}/`);
   if (!acct) return { error: "octopus account fetch failed" };
-  const start = new Date(Date.now() - 35 * 864e5).toISOString();
+  // deep fill: one-off pull of a full year of half-hourly data, then 35-day top-ups
+  const deep = !(state && state.octoDeepFill);
+  const start = new Date(Date.now() - (deep ? 370 : 35) * 864e5).toISOString();
   // half-hours our poller saw as IO-slot/car-charging (billed off-peak on Intelligent Octopus)
   const ioSet = new Set();
   for (const p of (state && state.hist) || []) {
@@ -175,15 +190,13 @@ async function fetchOctopus(env, state) {
       }
       let consumption = [], rates = [];
       if (serial) {
-        const c = await get(`https://api.octopus.energy/v1/electricity-meter-points/${mp.mpan}/meters/${serial}/consumption/`,
-          { period_from: start, page_size: "2500", order_by: "period" });
-        consumption = (c && c.results) || [];
+        consumption = await getAll(`https://api.octopus.energy/v1/electricity-meter-points/${mp.mpan}/meters/${serial}/consumption/`,
+          { period_from: start, page_size: "10000", order_by: "period" });
       }
       if (tariff) {
         const product = tariff.split("-").slice(2, -1).join("-");
-        const r = await get(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`,
-          { period_from: start, page_size: "2500" });
-        rates = (r && r.results) || [];
+        rates = await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`,
+          { period_from: start, page_size: "1500" });
       }
       const offRate = rates.length ? Math.min(...rates.map((r) => r.value_inc_vat)) : 5.9;
       for (const c of consumption) {
@@ -207,7 +220,12 @@ async function fetchOctopus(env, state) {
       out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: rates.slice(-200) };
     }
   }
-  out.daily = Object.keys(daily).sort().map((k) => daily[k]).slice(-40);
+  // merge with previously cached daily costs, fresh values win
+  const merged = {};
+  for (const r of ((state && state.octopus) || {}).daily || []) merged[r.d] = r;
+  Object.assign(merged, daily);
+  out.daily = Object.keys(merged).sort().map((k) => merged[k]).slice(-370);
+  if (state && deep) state.octoDeepFill = 1;
   return out;
 }
 
@@ -386,7 +404,40 @@ async function pollCycle(env, state, opts = {}) {
     else { day.impPeak += impW * dt; day.basisPeak += basisW * dt; }
     day.exp += expW * dt;
     const keys = Object.keys(L).sort();
-    for (const k of keys.slice(0, Math.max(0, keys.length - 92))) delete L[k];
+    for (const k of keys.slice(0, Math.max(0, keys.length - 400))) delete L[k];
+  }
+  // background ledger reconstruction: fill past days from Tesla's 5-min power history
+  if (!state.ledgerFillDone) {
+    try {
+      state.ledgerFillCursor = state.ledgerFillCursor ?? 2;
+      let n = 0;
+      while (n < 12 && state.ledgerFillCursor <= 370) {
+        const d = new Date(Date.now() - state.ledgerFillCursor * 864e5);
+        const dKey = londonDayEndISO(d).slice(0, 10);
+        if (!(state.ledger || {})[dKey]) {
+          const r = await tesla(env, state, "GET", `/api/1/energy_sites/${sid}/calendar_history`, null,
+            { kind: "power", period: "day", end_date: londonDayEndISO(d), time_zone: TZ });
+          const day = { impOff: 0, impPeak: 0, basisOff: 0, basisPeak: 0, exp: 0, fill: 1 };
+          let count = 0;
+          for (const row of (r || {}).time_series || []) {
+            const hm = (row.timestamp || "").slice(11, 16);
+            const off = hm >= "23:30" || hm < "05:30";
+            const dt = 5 / 60;
+            const so = row.solar_power || 0, ba = row.battery_power || 0, gr = row.grid_power || 0;
+            const lo = row.load_power != null ? row.load_power : so + ba + gr;
+            const imp = Math.max(gr, 0), ex = Math.max(-gr, 0);
+            const basis = Math.max(lo, 0) + Math.max(-ba, 0);
+            if (off) { day.impOff += imp * dt; day.basisOff += basis * dt; }
+            else { day.impPeak += imp * dt; day.basisPeak += basis * dt; }
+            day.exp += ex * dt; count++;
+          }
+          if (count > 0) { state.ledger = state.ledger || {}; state.ledger[dKey] = day; }
+          n++;
+        }
+        state.ledgerFillCursor++;
+      }
+      if (state.ledgerFillCursor > 370) state.ledgerFillDone = 1;
+    } catch (e) { log.push("ledgerfill error: " + String(e).slice(0, 100)); }
   }
   // dedupe + trim
   const seen = new Set(); const dedup = [];
