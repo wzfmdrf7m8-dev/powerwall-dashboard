@@ -12,36 +12,53 @@ jobs:
   install:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install cryptography requests
-      - name: exchange code and install encrypted refresh token
+      # exchange FIRST with stdlib only — auth codes expire in ~60s, so no
+      # checkout/pip before this step
+      - name: exchange code (fast, stdlib only)
         env:
           CLIENT_ID: ${{ secrets.TESLA_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.TESLA_CLIENT_SECRET }}
-          DASH_PASSWORD: ${{ secrets.DASH_PASSWORD }}
           CODE: ${{ github.event.inputs.code }}
         run: |
-          python - <<'EOF'
-          import base64, os, sys, requests
-          from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-          from cryptography.hazmat.primitives import hashes, padding
-          from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-          r = requests.post('https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token', data={
+          python3 - <<'EOF'
+          import json, os, sys, urllib.request, urllib.parse
+          data = urllib.parse.urlencode({
               'grant_type': 'authorization_code',
               'client_id': os.environ['CLIENT_ID'],
               'client_secret': os.environ['CLIENT_SECRET'],
               'code': os.environ['CODE'],
               'audience': 'https://fleet-api.prd.eu.vn.cloud.tesla.com',
               'redirect_uri': 'https://wzfmdrf7m8-dev.github.io/callback',
-          })
-          j = r.json()
+          }).encode()
+          req = urllib.request.Request('https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token', data=data)
+          try:
+              j = json.load(urllib.request.urlopen(req, timeout=30))
+          except urllib.error.HTTPError as e:
+              body = e.read().decode()
+              print('EXCHANGE FAILED:', body[:300])
+              sys.exit(1)
           rt = j.get('refresh_token')
           if not rt:
-              print('EXCHANGE FAILED:', {k: v for k, v in j.items() if 'token' not in k})
+              print('EXCHANGE FAILED: no refresh_token in response')
               sys.exit(1)
+          open(os.environ['RUNNER_TEMP'] + '/rt.txt', 'w').write(rt)
+          print('EXCHANGE OK — token captured, rotation clock no longer matters')
+          EOF
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install cryptography
+      - name: encrypt and install refresh token
+        env:
+          DASH_PASSWORD: ${{ secrets.DASH_PASSWORD }}
+        run: |
+          python - <<'EOF'
+          import base64, os
+          from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+          from cryptography.hazmat.primitives import hashes, padding
+          from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+          rt = open(os.environ['RUNNER_TEMP'] + '/rt.txt').read().strip()
           pw = os.environ['DASH_PASSWORD'].encode()
           salt, iv = os.urandom(16), os.urandom(16)
           key = PBKDF2HMAC(hashes.SHA256(), 32, salt, 200000).derive(pw)
@@ -51,7 +68,8 @@ jobs:
           ct = enc.update(data) + enc.finalize()
           os.makedirs('state', exist_ok=True)
           open('state/refresh.enc', 'w').write(base64.b64encode(salt + iv + ct).decode())
-          print('EXCHANGE OK — refresh token installed to state/refresh.enc')
+          os.remove(os.environ['RUNNER_TEMP'] + '/rt.txt')
+          print('INSTALLED state/refresh.enc')
           EOF
       - name: commit
         run: |
