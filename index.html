@@ -115,7 +115,7 @@
 <div class="toolbar">
   <h2>Energy</h2>
   <select id="period" onchange="LAST&&renderQuads(LAST)">
-    <option value="day">Today</option>
+    <option value="day">Day</option>
     <option value="week">Week</option>
     <option value="month">Month</option>
   </select>
@@ -438,6 +438,16 @@ function renderNet(d){
   let net=null,label='',imp=null,stand=null,exp=null;
   if(period==='day'){
     const today=(d.generated_at||'').slice(0,10);
+    const selDay=val('range')||today;
+    if(selDay<today){
+      // past day: prefer Octopus metered daily; fall back to the minute ledger
+      const r=((d.octopus||{}).daily||[]).find(x=>x.d===selDay);
+      const g=(d.ledger||{})[selDay];
+      if(r){label=selDay+' · metered';imp=r.impCost||0;stand=r.standing||0;exp=r.expEarn||0;net=imp+stand-exp}
+      else if(g){label=selDay+' · direct';imp=(g.impOff*TARIFF.offpeak+g.impPeak*TARIFF.peak)/1000;
+        stand=(d.octopus||{}).standing_now||0;exp=(g.exp/1000)*15;net=imp+stand-exp}
+      else label=selDay;
+    }else{
     const h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
     label='Today · live';
     if(h.length){
@@ -454,6 +464,7 @@ function renderNet(d){
       imp=cost; exp=earn;
       stand=(d.octopus||{}).standing_now||0;
       net=imp+stand-exp;
+    }
     }
   }else{
     const [rs,re]=(val('range')||'|').split('|');
@@ -480,7 +491,16 @@ function populateRange(period){
   const add=(v,l)=>{const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o)};
   const iso=d=>d.toISOString().slice(0,10);
   const lbl=d=>d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',timeZone:'UTC'});
-  if(period==='month'){
+  if(period==='day'){
+    // each day of the current billing month (15th → today), newest first
+    const bs=billingStart();
+    const dlbl=d=>d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short',timeZone:'UTC'});
+    for(let i=0;i<32;i++){
+      const d0=new Date(Date.now()-i*864e5),k=iso(d0);
+      if(k<bs)break;
+      add(k,i===0?'Today':dlbl(d0));
+    }
+  }else if(period==='month'){
     const bs=new Date(billingStart()+'T00:00:00Z');
     for(let i=0;i<12;i++){
       const s=new Date(Date.UTC(bs.getUTCFullYear(),bs.getUTCMonth()-i,15));
@@ -498,9 +518,11 @@ function populateRange(period){
 }
 function renderQuads(d){
   const period=val('period');
-  el('range').hidden=period==='day';
-  if(period!=='day') populateRange(period);
+  el('range').hidden=false;
+  populateRange(period);
   const today=(d.generated_at||'').slice(0,10);
+  const selDay=period==='day'?(val('range')||today):today;
+  const isToday=selDay===today||selDay>today;
   const L=d.live||{};
   const e=(d.energy_daily||[]).filter(r=>r.timestamp);
   const t=e.length?e[e.length-1]:{};
@@ -519,7 +541,20 @@ function renderQuads(d){
   el('q_grid_status').textContent=L.grid_power>50?'Importing':(L.grid_power<-50?'Exporting':'Idle');
 
   if(period==='day'){
-    const h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
+    let h;
+    if(isToday){
+      h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
+    }else{
+      // past day: rebuild 15-min samples from the worker's per-day bins
+      h=[];
+      const bins=(d.day_bins||{})[selDay]||[];
+      for(let i=0;i<96;i++){
+        const b=bins[i]; if(!b)continue;
+        h.push({t:selDay+'T'+String(Math.floor(i/4)).padStart(2,'0')+':'+String((i%4)*15).padStart(2,'0'),
+          solar:b[0],load:b[1],grid:b[2],battery:b[3],ev:b[4]||0});
+      }
+    }
+    const td=isToday?(e.length?e[e.length-1]:{}):((e.find(r=>r.timestamp.slice(0,10)===selDay))||{});
     // costs: solar = total generated × export rate; home = total used × import rate
     // (off-peak in the window, during EV smart-charge slots, or while car charging)
     const expRates=((d.octopus||{}).export||{}).rates||[];
@@ -537,7 +572,7 @@ function renderQuads(d){
     }
     el('q_home_cost').textContent=h.length?'≈ '+gbp(homeCost)+' inc. Powerwall & EV':'';
     el('q_solar_val').textContent=h.length?'≈ '+gbp(solarVal)+' export value (solar + PW)':'';
-    const dayExp=e.length?((t.grid_energy_exported_from_solar||0)+(t.grid_energy_exported_from_battery||0)):null;
+    const dayExp=td.timestamp?((td.grid_energy_exported_from_solar||0)+(td.grid_energy_exported_from_battery||0)):null;
     el('q_grid_exp').textContent=dayExp!=null?'↑ '+(dayExp/1000).toFixed(1)+' kWh exported (solar + Powerwall)':'';
     // full 24h axis: bucket samples into 15-min bins, gaps where no data
     const labels=[],mk=()=>Array(96).fill(null),sums={},cnts={};
@@ -549,13 +584,13 @@ function renderQuads(d){
       bin('solar',idx,p.solar);bin('load',idx,p.load);bin('grid',idx,p.grid);bin('battery',idx,p.battery);bin('ev',idx,p.ev);
     }
     const series=key=>mk().map((_,i)=>cnts[key]&&cnts[key][i]?sums[key][i]/cnts[key][i]/1000:null);
-    el('q_solar_tot').innerHTML=kwhv(t.solar_energy_exported)+'<small>kWh</small>';
-    el('q_home_tot').innerHTML=kwhv(e.length?homeOf(t):null)+'<small>kWh</small>';
-    el('q_batt_tot').innerHTML=kwhv(t.battery_energy_exported)+'<small>kWh</small>';
-    el('q_grid_tot').innerHTML=kwhv(e.length?netOf(t):null)+'<small>kWh</small>';
+    el('q_solar_tot').innerHTML=kwhv(td.solar_energy_exported)+'<small>kWh</small>';
+    el('q_home_tot').innerHTML=kwhv(td.timestamp?homeOf(td):null)+'<small>kWh</small>';
+    el('q_batt_tot').innerHTML=kwhv(td.battery_energy_exported)+'<small>kWh</small>';
+    el('q_grid_tot').innerHTML=kwhv(td.timestamp?netOf(td):null)+'<small>kWh</small>';
     const solarSeries=[{label:'Solar kW',data:series('solar'),color:'rgb(255,149,0)'}];
     const fc=d.solar_forecast||[];
-    if(fc.length){
+    if(fc.length&&isToday){
       const est=Array(96).fill(null);
       for(const f of fc){for(let q=0;q<4;q++){const i=f.h*4+q;if(i<96)est[i]=(f.w||0)/1000}}
       solarSeries.push({label:'Estimate kW',data:est,color:'rgb(255,149,0)',dash:[4,4]});
