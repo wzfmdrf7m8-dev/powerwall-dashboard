@@ -1,6 +1,7 @@
 // Powerwall poller — Cloudflare Worker port of apply.py
 // Cron: every minute. Storage: R2 (binding PW). Data served at /data, commands at /cmd.
 
+const STANDING_FALLBACK = 71; // pence/day — Jon's tariff (API returns none for this INTELLI variant)
 const TESLA_API = "https://fleet-api.prd.eu.vn.cloud.tesla.com";
 const TESLA_TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
 const OHME_GOOGLE_KEY = "AIzaSyC8ZeZngm33tpOXLpbXeKfwtyZ1WrkbdBY";
@@ -82,6 +83,8 @@ async function loadState(env) {
   // one-time migration (2026-07-17): re-run the Octopus deep fill so cached daily
   // rows gain standing charges; also refetch immediately rather than in 30 min
   if (!state.mig_std1) { state.octoDeepFill = 0; state.lastOcto = 0; state.mig_std1 = 1; }
+  // one-time migration (2026-07-17): refill again with the 71p/day standing fallback
+  if (!state.mig_std2) { state.octoDeepFill = 0; state.lastOcto = 0; state.mig_std2 = 1; }
   // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
   state.keySalt = env.DASH_SALT_B64;
   state.keyRaw = env.DASH_KEY_B64;
@@ -203,7 +206,7 @@ async function fetchOctopus(env, state) {
         if (kind === "import") {
           standing = await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standing-charges/`,
             { period_from: start, page_size: "1500" });
-          out.standing_now = rateAtEpoch(standing, Date.now()) ?? 0;
+          out.standing_now = rateAtEpoch(standing, Date.now()) ?? STANDING_FALLBACK;
           out._standing = standing;
         }
       }
@@ -231,7 +234,7 @@ async function fetchOctopus(env, state) {
   }
   // per-day standing charge from the dated tariff schedule
   for (const k of Object.keys(daily)) {
-    daily[k].standing = rateAtEpoch(out._standing || [], Date.parse(k + "T12:00:00Z")) ?? (out.standing_now || 0);
+    daily[k].standing = rateAtEpoch(out._standing || [], Date.parse(k + "T12:00:00Z")) ?? out.standing_now ?? STANDING_FALLBACK;
   }
   delete out._standing;
   // merge with previously cached daily costs, fresh values win
