@@ -428,31 +428,17 @@ function billingStart(){
   const s=n.getDate()>=15?new Date(Date.UTC(y,m,15)):new Date(Date.UTC(y,m-1,15));
   return s.toISOString().slice(0,10);
 }
-function offpeakShare(d){
-  let offWh=0,totWh=0,pv=null;
-  for(const p of (d.history||[])){
-    let dtH=1/60;
-    if(pv&&pv.t){const dt=(new Date(p.t)-new Date(pv.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
-    const wh=Math.max(p.load||0,0)*dtH;
-    totWh+=wh; if(sampleOffpeak(p)) offWh+=wh;
-    pv=p;
-  }
-  return totWh>0?offWh/totWh:0;
-}
 function renderNet(d){
-  const e=(d.energy_daily||[]).filter(r=>r.timestamp&&r.timestamp.slice(0,10)>=billingStart());
-  const expRates=((d.octopus||{}).export||{}).rates||[];
-  const expR=rateFor(expRates,new Date().toISOString())??15;
-  const share=offpeakShare(d);
-  const blended=share*TARIFF.offpeak+(1-share)*TARIFF.peak;
-  const imp=e.reduce((a,r)=>a+(r.grid_energy_imported||0),0)/1000;
-  const exp=e.reduce((a,r)=>a+(r.grid_energy_exported_from_solar||0)+(r.grid_energy_exported_from_battery||0),0)/1000;
-  const net=imp*blended-exp*expR;
+  // direct: Octopus half-hourly consumption × actual rates (IO slots repriced off-peak)
+  const rows=((d.octopus||{}).daily||[]).filter(r=>r.d>=billingStart());
   const n=el('netCost');
-  if(!e.length){n.textContent='–';return}
+  if(!rows.length){n.textContent='–';return}
+  const cost=rows.reduce((a,r)=>a+(r.impCost||0),0);
+  const earn=rows.reduce((a,r)=>a+(r.expEarn||0),0);
+  const net=cost-earn;
   n.textContent=(net<0?'−':'')+gbp(Math.abs(net));
   n.style.color=net<=0?'var(--mint)':'var(--pink)';
-  el('netLbl').textContent='Billing month from '+billingStart().slice(8,10)+'/'+billingStart().slice(5,7)+' · net '+(net<=0?'credit':'cost');
+  el('netLbl').textContent='Billing month from '+billingStart().slice(8,10)+'/'+billingStart().slice(5,7)+' · metered · net '+(net<=0?'credit':'cost');
 }
 function renderQuads(d){
   const period=val('period');
@@ -527,17 +513,19 @@ function renderQuads(d){
     const rows=period==='week'?e.slice(-7):e.filter(r=>r.timestamp.slice(0,10)>=billingStart());
     const labels=rows.map(r=>r.timestamp.slice(5,10));
     const sum=f=>rows.length?rows.reduce((a,r)=>a+(f(r)||0),0):null;
-    // period £: solar = kWh × export rate; home = kWh × blended tariff
-    // (off-peak share measured from recent minute-level history)
+    // period £: solar = kWh × export rate; home = direct from the daily ledger
     const expRates=((d.octopus||{}).export||{}).rates||[];
     const expR=rateFor(expRates,new Date().toISOString())??15;
-    const share=offpeakShare(d);
-    const blended=share*TARIFF.offpeak+(1-share)*TARIFF.peak;
-    const sumSolar=sum(r=>r.solar_energy_exported), sumHome=sum(homeOf);
+    const sumSolar=sum(r=>r.solar_energy_exported);
     const sumExp=sum(r=>(r.grid_energy_exported_from_solar||0)+(r.grid_energy_exported_from_battery||0));
     el('q_solar_val').textContent=sumSolar!=null?'≈ '+gbp(sumSolar/1000*expR)+' at export rate':'';
-    el('q_home_cost').textContent=sumHome!=null?'≈ '+gbp(sumHome/1000*blended)+' at blended tariff':'';
     el('q_grid_exp').textContent=sumExp!=null?'↑ '+(sumExp/1000).toFixed(1)+' kWh exported (solar + Powerwall)':'';
+    // direct home cost from the minute-accurate daily ledger (no blending)
+    const led=d.ledger||{};
+    const dayKeys=rows.map(r=>r.timestamp.slice(0,10));
+    let c=0,covered=0;
+    for(const dy of dayKeys){const g=led[dy];if(!g)continue;covered++;c+=(g.basisOff*TARIFF.offpeak+g.basisPeak*TARIFF.peak)/1000}
+    el('q_home_cost').textContent=covered?('≈ '+gbp(c)+' direct'+(covered<dayKeys.length?` (${covered}/${dayKeys.length} days)`:'')):'';
     el('q_solar_tot').innerHTML=kwhv(sum(r=>r.solar_energy_exported))+'<small>kWh</small>';
     el('q_home_tot').innerHTML=kwhv(sum(homeOf))+'<small>kWh</small>';
     el('q_batt_tot').innerHTML=kwhv(sum(r=>r.battery_energy_exported))+'<small>kWh</small>';
