@@ -86,6 +86,7 @@
   <div style="text-align:right;margin-right:8px">
     <div class="sub" id="netLbl">Billing month (from 15th)</div>
     <div id="netCost" style="font-size:26px;font-weight:750;font-variant-numeric:tabular-nums">–</div>
+    <div class="sub" id="netBreak" style="font-size:11px"></div>
   </div>
   <div class="sub" id="modeline"></div>
   <button class="sec" style="font-size:12px;padding:5px 12px" onclick="lockNow()">Lock</button>
@@ -430,12 +431,11 @@ function billingStart(){
   return s.toISOString().slice(0,10);
 }
 function renderNet(d){
-  // follows the selected view: Today = live minute ledger; Week/Month = Octopus metered
+  // follows the selected view: Today = live minute history; Week/Month = Octopus metered
   const period=val('period');
   const n=el('netCost');
-  let net=null,label='';
+  let net=null,label='',imp=null,stand=null,exp=null;
   if(period==='day'){
-    // full-day pricing from minute history (covers hours before the ledger existed)
     const today=(d.generated_at||'').slice(0,10);
     const h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
     label='Today · live';
@@ -450,19 +450,27 @@ function renderNet(d){
         earn+=Math.max(-(p.grid||0),0)*dtH/1000*expR;
         prev=p;
       }
-      net=cost-earn;
+      imp=cost; exp=earn;
+      stand=(d.octopus||{}).standing_now||0;
+      net=imp+stand-exp;
     }
   }else{
     const [rs,re]=(val('range')||'|').split('|');
     const rows=((d.octopus||{}).daily||[]).filter(r=>r.d>=rs&&r.d<re);
     const sel=el('range');
     label=(sel.selectedOptions[0]?sel.selectedOptions[0].textContent:'')+' · metered';
-    if(rows.length) net=rows.reduce((a,r)=>a+(r.impCost||0),0)-rows.reduce((a,r)=>a+(r.expEarn||0),0);
+    if(rows.length){
+      imp=rows.reduce((a,r)=>a+(r.impCost||0),0);
+      stand=rows.reduce((a,r)=>a+(r.standing||0),0);
+      exp=rows.reduce((a,r)=>a+(r.expEarn||0),0);
+      net=imp+stand-exp;
+    }
   }
-  if(net==null){n.textContent='–';n.style.color='var(--dim)';el('netLbl').textContent=label+' · no metered data';return}
+  if(net==null){n.textContent='–';n.style.color='var(--dim)';el('netLbl').textContent=label+' · no metered data';el('netBreak').textContent='';return}
   n.textContent=(net<0?'−':'')+gbp(Math.abs(net));
   n.style.color=net<=0?'var(--mint)':'var(--pink)';
   el('netLbl').textContent=label+' · net '+(net<=0?'credit':'cost');
+  el('netBreak').textContent='imports '+gbp(imp)+' + standing '+gbp(stand)+' − exports '+gbp(exp);
 }
 function populateRange(period){
   const sel=el('range');
