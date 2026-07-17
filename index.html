@@ -646,7 +646,7 @@ function renderQuads(d){
     el('q_home_cost').textContent=h.length?'≈ '+gbp(homeCost)+' inc. Powerwall & EV':'';
     el('q_solar_val').textContent=h.length?'≈ '+gbp(solarVal)+' export value (solar + PW)':'';
     const dayExp=td.timestamp?((td.grid_energy_exported_from_solar||0)+(td.grid_energy_exported_from_battery||0)):null;
-    el('q_grid_exp').textContent=dayExp!=null?'↑ '+(dayExp/1000).toFixed(1)+' kWh exported (solar + Powerwall)':'';
+    el('q_grid_exp').textContent=dayExp!=null?'↓ '+((td.grid_energy_imported||0)/1000).toFixed(1)+' kWh imported · ↑ '+(dayExp/1000).toFixed(1)+' kWh exported (solar + PW)':'';
     // full 24h axis: bucket samples into 15-min bins, gaps where no data
     const labels=[],mk=()=>Array(96).fill(null),sums={},cnts={};
     for(let i=0;i<96;i++) labels.push(String(Math.floor(i/4)).padStart(2,'0')+':'+String((i%4)*15).padStart(2,'0'));
@@ -704,8 +704,9 @@ function renderQuads(d){
     const sumSolar=sum(r=>r.solar_energy_exported);
     const sumBattExp=sum(r=>r.grid_energy_exported_from_battery)||0;
     const sumExp=sum(r=>(r.grid_energy_exported_from_solar||0)+(r.grid_energy_exported_from_battery||0));
+    const sumImp=sum(r=>r.grid_energy_imported);
     el('q_solar_val').textContent=sumSolar!=null?'≈ '+gbp((sumSolar+sumBattExp)/1000*expR)+' export value (solar + PW)':'';
-    el('q_grid_exp').textContent=sumExp!=null?'↑ '+(sumExp/1000).toFixed(1)+' kWh exported (solar + Powerwall)':'';
+    el('q_grid_exp').textContent=sumExp!=null?'↓ '+((sumImp||0)/1000).toFixed(1)+' kWh imported · ↑ '+(sumExp/1000).toFixed(1)+' kWh exported (solar + PW)':'';
     // direct home cost from the minute-accurate daily ledger (no blending)
     const led=d.ledger||{};
     const dayKeys=rows.map(r=>r.timestamp.slice(0,10));
