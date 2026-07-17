@@ -1,7 +1,7 @@
 // Powerwall poller — Cloudflare Worker port of apply.py
 // Cron: every minute. Storage: R2 (binding PW). Data served at /data, commands at /cmd.
 
-const STANDING_FALLBACK = 71; // pence/day — Jon's tariff (API returns none for this INTELLI variant)
+const STANDING_FALLBACK = 66.38; // pence/day — from the Jun/Jul 2026 statement (66.38p/day)
 const TESLA_API = "https://fleet-api.prd.eu.vn.cloud.tesla.com";
 const TESLA_TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
 const OHME_GOOGLE_KEY = "AIzaSyC8ZeZngm33tpOXLpbXeKfwtyZ1WrkbdBY";
@@ -86,6 +86,9 @@ async function loadState(env) {
   if (!state.mig_std1) { state.octoDeepFill = 0; state.lastOcto = 0; state.mig_std1 = 1; }
   // one-time migration (2026-07-17): refill again with the 71p/day standing fallback
   if (!state.mig_std2) { state.octoDeepFill = 0; state.lastOcto = 0; state.mig_std2 = 1; }
+  // one-time migration (2026-07-17): statements showed our rates were wrong — refill
+  // the year pricing each period under its actual agreement (per-agreement rates)
+  if (!state.mig_agr1) { state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0; state.mig_agr1 = 1; }
   // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
   state.keySalt = env.DASH_SALT_B64;
   state.keyRaw = env.DASH_KEY_B64;
@@ -215,33 +218,59 @@ async function fetchOctopus(env, state) {
         consumption = await getAll(`https://api.octopus.energy/v1/electricity-meter-points/${mp.mpan}/meters/${serial}/consumption/`,
           { period_from: start, page_size: "20000", order_by: "period", ...(chunkEnd ? { period_to: chunkEnd } : {}) });
       }
-      if (tariff) {
-        const product = tariff.split("-").slice(2, -1).join("-");
-        rates = await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/`,
-          { period_from: start, page_size: "1500" });
-        if (kind === "import") {
-          standing = await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${tariff}/standing-charges/`,
-            { period_from: start, page_size: "1500" });
-          out.standing_now = rateAtEpoch(standing, Date.now()) ?? STANDING_FALLBACK;
-          out._standing = standing;
-        }
+      // price each period under the agreement that was actually in force (the
+      // tariff changed twice this year — statements: Go 5.71/29.06 → 4.00/27.46 → 5.62/29.84)
+      const winEnd = chunkEnd || new Date().toISOString();
+      for (const ag of mp.agreements || []) {
+        const af = ag.valid_from || "2000", at = ag.valid_to || "9999";
+        if (at <= start || af >= winEnd) continue; // agreement outside our pull window
+        const code = ag.tariff_code;
+        const product = code.split("-").slice(2, -1).join("-");
+        const params = { period_from: af > start ? af : start, period_to: at < winEnd ? at : winEnd, page_size: "1500" };
+        rates = rates.concat(await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${code}/standard-unit-rates/`, params));
+        if (kind === "import")
+          standing = standing.concat(await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${code}/standing-charges/`, params));
       }
-      const offRate = rates.length ? Math.min(...rates.map((r) => r.value_inc_vat)) : 5.9;
+      if (kind === "import") {
+        out.standing_now = rateAtEpoch(standing, Date.now()) ?? STANDING_FALLBACK;
+        out._standing = (out._standing || []).concat(standing);
+      }
+      // cheapest rate per local day (the "night" rate under whichever product applied)
+      const shortMin = {}, longRows = [];
+      for (const r of rates) {
+        const f = Date.parse(r.valid_from || 0), t = r.valid_to ? Date.parse(r.valid_to) : null;
+        if (t && t - f <= 2 * 864e5) {
+          for (const ms of [f, t - 1]) {
+            const k = localMinuteISO(new Date(ms)).slice(0, 10);
+            if (shortMin[k] == null || r.value_inc_vat < shortMin[k]) shortMin[k] = r.value_inc_vat;
+          }
+        } else longRows.push(r);
+      }
+      const minRateAt = (ms, dy) => {
+        let m = shortMin[dy];
+        for (const r of longRows) {
+          const f = Date.parse(r.valid_from || 0), t = r.valid_to ? Date.parse(r.valid_to) : Infinity;
+          if (f <= ms && ms < t && (m == null || r.value_inc_vat < m)) m = r.value_inc_vat;
+        }
+        return m;
+      };
       for (const c of consumption) {
         if (!c.interval_start) continue;
-        const lm = localMinuteISO(new Date(Date.parse(c.interval_start))); // once per row
+        const ts = Date.parse(c.interval_start);
+        const lm = localMinuteISO(new Date(ts)); // once per row
         const dy = lm.slice(0, 10);
         const d = (daily[dy] = daily[dy] || { d: dy, impKwh: 0, impCost: 0, offKwh: 0, peakKwh: 0, expKwh: 0, expEarn: 0 });
-        let rate = rateAtEpoch(rates, Date.parse(c.interval_start));
+        let rate = rateAtEpoch(rates, ts);
         if (kind === "import") {
+          const dayMin = minRateAt(ts, dy);
           const localKey = lm.slice(0, 16);
-          if (ioSet.has(localKey)) rate = offRate; // IO bonus slot repricing
-          if (rate == null) rate = offRate;
+          if (ioSet.has(localKey) && dayMin != null) rate = dayMin; // IO bonus slot repricing
+          if (rate == null) rate = dayMin ?? 5.62;
           d.impKwh += c.consumption;
           d.impCost += c.consumption * rate;
-          if (rate === offRate) d.offKwh += c.consumption; else d.peakKwh += c.consumption;
+          if (dayMin != null && rate <= dayMin + 0.01) d.offKwh += c.consumption; else d.peakKwh += c.consumption;
         } else {
-          if (rate == null) rate = 15;
+          if (rate == null) rate = 12;
           d.expKwh += c.consumption;
           d.expEarn += c.consumption * rate;
         }
