@@ -106,6 +106,9 @@ async function loadState(env) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0; state.mig_agr3 = 1;
     try { await env.PW.delete("octofill.txt"); } catch (e) {}
   }
+  // one-time migration (2026-07-17d): refetch 12 months of Tesla daily energy — the
+  // BST anchor bug meant whole months (incl. June) were missing from the charts
+  if (!state.mig_en1) { state.energyDeepFill = 0; state.lastEnergy = 0; state.mig_en1 = 1; }
   // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
   state.keySalt = env.DASH_SALT_B64;
   state.keyRaw = env.DASH_KEY_B64;
@@ -423,15 +426,19 @@ async function fetchEnergyDaily(env, state, sid) {
     return (r || {}).time_series || [];
   };
   const now = new Date();
+  // month anchors at NOON UTC on the month's last day — 23:59 UTC is already the
+  // next month in BST, which silently skipped whole months (June was never fetched)
+  const monthEnd = (mBack) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - mBack + 1, 0, 12));
   let rows = [
-    ...await monthSeries(new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)),
+    ...await monthSeries(monthEnd(1)),
     ...await monthSeries(now),
   ];
   // one-off deep fill: 12 months of daily history, then cached in state
-  if (!state.energyDeepFill) {
+  // (waits for the octopus fill to finish so one tick never does both)
+  if (!state.energyDeepFill && state.octoDeepFill) {
     for (let mBack = 2; mBack <= 12; mBack++) {
       try {
-        rows = rows.concat(await monthSeries(new Date(now.getFullYear(), now.getMonth() - mBack + 1, 0, 23, 59, 59)));
+        rows = rows.concat(await monthSeries(monthEnd(mBack)));
       } catch (e) {}
     }
     state.energyDeepFill = 1;
