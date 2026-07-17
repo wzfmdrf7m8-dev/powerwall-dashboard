@@ -118,6 +118,7 @@
     <option value="day">Day</option>
     <option value="week">Week</option>
     <option value="month">Month</option>
+    <option value="year">Year</option>
   </select>
   <select id="range" hidden onchange="LAST&&renderQuads(LAST)"></select>
 </div>
@@ -273,9 +274,9 @@ async function loadData(pass){
   const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
   return JSON.parse(new TextDecoder().decode(pt));
 }
-let DAYBINS=null,DAYBINSP=null;
+let DAYBINS=null,DAYBINSP=null,ARCH=null;
 async function loadDayBins(){
-  // per-day 15-min bins live in a separate blob (updated ~every 30 min)
+  // archive blob: per-day 15-min bins + full ~2yr daily history (updated ~every 30 min)
   if(DAYBINS) return DAYBINS;
   if(DAYBINSP) return DAYBINSP;
   DAYBINSP=(async()=>{
@@ -284,10 +285,30 @@ async function loadDayBins(){
     const raw=Uint8Array.from(atob((await res.text()).trim()),c=>c.charCodeAt(0));
     const key=await deriveKey(PASS,raw.slice(0,16));
     const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
-    DAYBINS=(JSON.parse(new TextDecoder().decode(pt)).day_bins)||{};
+    const j=JSON.parse(new TextDecoder().decode(pt));
+    DAYBINS=j.day_bins||{};
+    ARCH={energy:j.energy_daily||[],octo:j.octopus_daily||[]};
     return DAYBINS;
   })().catch(e=>{DAYBINSP=null;throw e});
   return DAYBINSP;
+}
+// merge the recent bundle rows over the archive (fresh wins)
+function mergedEnergy(d){
+  let e=(d.energy_daily||[]).filter(r=>r.timestamp);
+  if(ARCH&&ARCH.energy.length){
+    const seen=new Set(e.map(r=>r.timestamp.slice(0,10)));
+    e=ARCH.energy.filter(r=>r.timestamp&&!seen.has(r.timestamp.slice(0,10))).concat(e);
+    e.sort((a,b)=>a.timestamp<b.timestamp?-1:1);
+  }
+  return e;
+}
+function mergedOcto(d){
+  let od=((d.octopus||{}).daily||[]);
+  if(ARCH&&ARCH.octo.length){
+    const seen=new Set(od.map(r=>r.d));
+    od=ARCH.octo.filter(r=>!seen.has(r.d)).concat(od);
+  }
+  return od;
 }
 const el=id=>document.getElementById(id), val=id=>el(id).value;
 const kw=w=>w==null?'–':(Math.abs(w)>=950?(w/1000).toFixed(1)+' kW':Math.round(w)+' W');
@@ -485,7 +506,7 @@ function renderNet(d){
     }
   }else{
     const [rs,re]=(val('range')||'|').split('|');
-    const rows=((d.octopus||{}).daily||[]).filter(r=>r.d>=rs&&r.d<re);
+    const rows=mergedOcto(d).filter(r=>r.d>=rs&&r.d<re);
     const sel=el('range');
     label=(sel.selectedOptions[0]?sel.selectedOptions[0].textContent:'')+' · metered';
     if(rows.length){
@@ -522,6 +543,9 @@ function populateRange(period){
       const e2=new Date(Date.UTC(s.getUTCFullYear(),s.getUTCMonth()+1,16));
       add(iso(s)+'|'+iso(e2),lbl(s)+' – '+lbl(new Date(e2-864e5)));
     }
+  }else if(period==='year'){
+    const yNow=new Date().getUTCFullYear();
+    for(let y=yNow;y>=2024;y--) add(y+'-01-01|'+(y+1)+'-01-01',String(y));
   }else{
     const n=new Date(),dow=(n.getUTCDay()+6)%7;
     const mon=Date.UTC(n.getUTCFullYear(),n.getUTCMonth(),n.getUTCDate()-dow);
@@ -535,11 +559,12 @@ function renderQuads(d){
   const period=val('period');
   el('range').hidden=false;
   populateRange(period);
+  if(!ARCH&&PASS) loadDayBins().then(()=>{LAST&&renderQuads(LAST)}).catch(()=>{});
   const today=(d.generated_at||'').slice(0,10);
   const selDay=period==='day'?(val('range')||today):today;
   const isToday=selDay===today||selDay>today;
   const L=d.live||{};
-  const e=(d.energy_daily||[]).filter(r=>r.timestamp);
+  const e=mergedEnergy(d);
   const t=e.length?e[e.length-1]:{};
   const kwv=w=>w==null?'–':(Math.abs(w)/1000).toFixed(1);
   const kwhv=x=>x==null?'–':(x/1000).toFixed(1);
@@ -625,10 +650,21 @@ function renderQuads(d){
     mkQuad('q_batt',labels,[{label:'Powerwall kW',data:series('battery'),color:'rgb(52,199,89)'}]);
     mkQuad('q_grid',labels,[{label:'Grid kW',data:series('grid'),color:'rgb(255,59,48)'}]);
   }else{
-    // selected historical range (weeks: Mon–Sun; months: 15th–14th billing periods)
+    // selected historical range (weeks: Mon–Sun; months: 16th–15th billing; years: Jan–Dec)
     const [rs,re]=(val('range')||'|').split('|');
-    const rows=e.filter(r=>{const d0=r.timestamp.slice(0,10);return d0>=rs&&d0<re});
-    const labels=rows.map(r=>r.timestamp.slice(5,10));
+    let rows=e.filter(r=>{const d0=r.timestamp.slice(0,10);return d0>=rs&&d0<re});
+    let labels;
+    if(period==='year'){
+      // aggregate daily rows into monthly bars
+      const byM={};
+      for(const r of rows){
+        const k=r.timestamp.slice(0,7);
+        const o=(byM[k]=byM[k]||{timestamp:k+'-15T00:00:00'});
+        for(const [kk,v] of Object.entries(r)) if(typeof v==='number') o[kk]=(o[kk]||0)+v;
+      }
+      rows=Object.keys(byM).sort().map(k=>byM[k]);
+      labels=rows.map(r=>r.timestamp.slice(0,7));
+    }else labels=rows.map(r=>r.timestamp.slice(5,10));
     const sum=f=>rows.length?rows.reduce((a,r)=>a+(f(r)||0),0):null;
     // period £: solar = kWh × export rate; home = direct from the daily ledger
     const expRates=((d.octopus||{}).export||{}).rates||[];
