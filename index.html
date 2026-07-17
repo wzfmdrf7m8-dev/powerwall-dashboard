@@ -270,7 +270,7 @@
 
 <script>
 const REPO='wzfmdrf7m8-dev/powerwall-dashboard', WF='poll.yml', SVGNS='http://www.w3.org/2000/svg';
-const TARIFF={offpeak:5.62, peak:29.84, start:'23:30', end:'05:30'};  // pence per kWh — Jun 2026 statement
+const TARIFF={offpeak:5.90, peak:31.33, start:'23:30', end:'05:30'};  // pence/kWh INC 5% VAT (bill shows 5.62/29.84 ex-VAT)
 let PASS=null,LAST=null,quadCharts={};
 
 async function deriveKey(pass,salt){
