@@ -529,7 +529,11 @@ function renderNet(d){
         earn+=Math.max(-(p.grid||0),0)*dtH/1000*expR;
       }
       imp=(mr?(mr.impCost||0):0)+cost;
-      exp=(mr?(mr.expEarn||0):0)+earn;
+      // exports: price Tesla's daily export counter (same number as the Grid quadrant)
+      // — minute-sampling integration drifts a few % and confuses the arithmetic
+      const td2=mergedEnergy(d).find(r=>r.timestamp&&r.timestamp.slice(0,10)===today);
+      const tdExpWh=td2!=null?((td2.grid_energy_exported_from_solar||0)+(td2.grid_energy_exported_from_battery||0)):null;
+      exp=tdExpWh!=null?tdExpWh/1000*expR:(mr?(mr.expEarn||0):0)+earn;
       stand=(mr&&mr.standing)||(d.octopus||{}).standing_now||0;
       label=mr?'Today · metered + live':'Today · live';
       net=imp+stand-exp;
