@@ -109,6 +109,12 @@ async function loadState(env) {
   // one-time migration (2026-07-17d): refetch 12 months of Tesla daily energy — the
   // BST anchor bug meant whole months (incl. June) were missing from the charts
   if (!state.mig_en1) { state.energyDeepFill = 0; state.lastEnergy = 0; state.mig_en1 = 1; }
+  // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
+  if (!state.mig_yr1) {
+    state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
+    state.energyDeepFill = 0; state.lastEnergy = 0; state.mig_yr1 = 1;
+    try { await env.PW.delete("octofill.txt"); } catch (e) {}
+  }
   // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
   state.keySalt = env.DASH_SALT_B64;
   state.keyRaw = env.DASH_KEY_B64;
@@ -212,7 +218,7 @@ async function fetchOctopus(env, state) {
     if (state.octoFillCursor == null) {
       try { const o = await env.PW.get("octofill.txt"); if (o) { const v = parseInt(await o.text(), 10); if (v > 35) state.octoFillCursor = v; } } catch (e) {}
     }
-    const cur = (state.octoFillCursor = state.octoFillCursor ?? 370); // days ago, counts down
+    const cur = (state.octoFillCursor = state.octoFillCursor ?? 750); // days ago, counts down (~2 years)
     // chunk boundaries at LOCAL midnight — a mid-day cut leaves partial days that
     // overwrite the other half, silently dropping the overnight cheap-rate usage
     start = londonDayStartISO(new Date(Date.now() - cur * 864e5));
@@ -318,7 +324,7 @@ async function fetchOctopus(env, state) {
   const merged = {};
   for (const r of ((state && state.octopus) || {}).daily || []) merged[r.d] = r;
   Object.assign(merged, daily);
-  out.daily = Object.keys(merged).sort().map((k) => merged[k]).slice(-370);
+  out.daily = Object.keys(merged).sort().map((k) => merged[k]).slice(-750);
   if (state && deep) {
     state.octoFillCursor = Math.max(35, (state.octoFillCursor ?? 370) - CHUNK);
     // persist progress instantly — a later CPU overrun must not rewind the fill
@@ -436,7 +442,7 @@ async function fetchEnergyDaily(env, state, sid) {
   // one-off deep fill: 12 months of daily history, then cached in state
   // (waits for the octopus fill to finish so one tick never does both)
   if (!state.energyDeepFill && state.octoDeepFill) {
-    for (let mBack = 2; mBack <= 12; mBack++) {
+    for (let mBack = 2; mBack <= 25; mBack++) {
       try {
         rows = rows.concat(await monthSeries(monthEnd(mBack)));
       } catch (e) {}
@@ -457,7 +463,7 @@ async function fetchEnergyDaily(env, state, sid) {
   const byDay = {};
   for (const r of state.energyDaily || []) if (r.timestamp) byDay[r.timestamp.slice(0, 10)] = r;
   Object.assign(byDay, fresh);
-  return Object.keys(byDay).sort().map((k) => byDay[k]).slice(-370);
+  return Object.keys(byDay).sort().map((k) => byDay[k]).slice(-750);
 }
 async function backfillHistory(env, state, sid) {
   const merged = {};
@@ -679,22 +685,27 @@ async function pollCycle(env, state, opts = {}) {
       nameplate_energy, battery_count, user_settings, components }) =>
       ({ backup_reserve_percent, default_real_mode, installation_date, nameplate_power,
          nameplate_energy, battery_count, user_settings, components }))(state.siteInfo || {}),
-    energy_daily: state.energyDaily || [],
+    // recent slices only — full 750-day history lives in the archive blob (/daybins)
+    energy_daily: (state.energyDaily || []).slice(-60),
     solar_forecast: state.solarForecast || [],
     ledger: state.ledger || {},
     history: state.hist,
     automations: state.config,
     log: log.length ? log : (state.lastLog || []),
-    octopus: state.octopus || null,
+    octopus: state.octopus ? { ...state.octopus, daily: (state.octopus.daily || []).slice(-60) } : null,
     ohme: state.ohmeData || null,
     source: "cloudflare-worker",
   };
   const enc = await encryptBundle(state, bundle);
   await env.PW.put("dashboard.enc", enc);
-  // day bins live in their own blob, written only when they change (~every 30 min)
-  // — keeps the every-minute encrypt small and the CPU per tick down
+  // archive blob (day bins + full daily history), written only when it changes
+  // (~every 30 min) — keeps the every-minute encrypt small and CPU per tick down
   if (state.binsDirty) {
-    await env.PW.put("daybins.enc", await encryptBundle(state, { day_bins: state.dayBins || {} }));
+    await env.PW.put("daybins.enc", await encryptBundle(state, {
+      day_bins: state.dayBins || {},
+      energy_daily: state.energyDaily || [],
+      octopus_daily: ((state.octopus || {}).daily) || [],
+    }));
     state.binsDirty = 0;
   }
   await saveState(env, state);
