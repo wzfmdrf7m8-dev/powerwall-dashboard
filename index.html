@@ -437,8 +437,8 @@ function mkQuad(canvasId,labels,series,type){
     backgroundColor:s.color.replace('rgb','rgba').replace(')',type==='bar'?',.85)':',.18)'),
     fill:s.dash?false:(type==='bar'?undefined:'origin'),pointRadius:0,tension:.3,spanGaps:!!s.dash,borderRadius:type==='bar'?4:0}))},
     options:{animation:false,scales:{
-      y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4}},
-      x:{ticks:{maxTicksLimit:6,color:'#6e6e73'},grid:{display:false}}},
+      y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4},stacked:type==='bar'&&series.length>1},
+      x:{ticks:{maxTicksLimit:6,color:'#6e6e73'},grid:{display:false},stacked:type==='bar'&&series.length>1}},
       plugins:{legend:{display:series.length>1,labels:{color:'#6e6e73',boxWidth:10}}},
       interaction:{intersect:false,mode:'index'}}});
 }
@@ -598,13 +598,16 @@ function renderQuads(d){
       const idx=parseInt(p.t.slice(11,13),10)*4+Math.floor(parseInt(p.t.slice(14,16),10)/15);
       if(idx<0||idx>95)continue;
       bin('solar',idx,p.solar);bin('load',idx,p.load);bin('grid',idx,p.grid);bin('battery',idx,p.battery);bin('ev',idx,p.ev);
+      // Powerwall discharge that actually reached the grid
+      bin('pwexp',idx,Math.min(Math.max(p.battery||0,0),Math.max(-(p.grid||0),0)));
     }
     const series=key=>mk().map((_,i)=>cnts[key]&&cnts[key][i]?sums[key][i]/cnts[key][i]/1000:null);
     el('q_solar_tot').innerHTML=kwhv(td.solar_energy_exported)+'<small>kWh</small>';
     el('q_home_tot').innerHTML=kwhv(td.timestamp?homeOf(td):null)+'<small>kWh</small>';
     el('q_batt_tot').innerHTML=kwhv(td.battery_energy_exported)+'<small>kWh</small>';
     el('q_grid_tot').innerHTML=kwhv(td.timestamp?netOf(td):null)+'<small>kWh</small>';
-    const solarSeries=[{label:'Solar kW',data:series('solar'),color:'rgb(255,149,0)'}];
+    const solarSeries=[{label:'Solar kW',data:series('solar'),color:'rgb(255,149,0)'},
+      {label:'PW export kW',data:series('pwexp'),color:'rgb(52,199,89)'}];
     const fc=d.solar_forecast||[];
     if(fc.length&&isToday){
       const est=Array(96).fill(null);
@@ -644,7 +647,8 @@ function renderQuads(d){
     el('q_batt_tot').innerHTML=kwhv(sum(r=>r.battery_energy_exported))+'<small>kWh</small>';
     el('q_grid_tot').innerHTML=kwhv(sum(netOf))+'<small>kWh</small>';
     el('q_ev_lbl').innerHTML='';
-    mkQuad('q_solar',labels,[{label:'Solar kWh/day',data:rows.map(r=>(r.solar_energy_exported||0)/1000),color:'rgb(255,149,0)'}],'bar');
+    mkQuad('q_solar',labels,[{label:'Solar kWh/day',data:rows.map(r=>(r.solar_energy_exported||0)/1000),color:'rgb(255,149,0)'},
+      {label:'PW export kWh/day',data:rows.map(r=>(r.grid_energy_exported_from_battery||0)/1000),color:'rgb(52,199,89)'}],'bar');
     mkQuad('q_home',labels,[{label:'Home kWh/day',data:rows.map(r=>homeOf(r)/1000),color:'rgb(0,122,255)'}],'bar');
     mkQuad('q_batt',labels,[{label:'Discharged kWh/day',data:rows.map(r=>(r.battery_energy_exported||0)/1000),color:'rgb(52,199,89)'}],'bar');
     mkQuad('q_grid',labels,[{label:'Net grid kWh/day',data:rows.map(r=>netOf(r)/1000),color:'rgb(255,59,48)'}],'bar');
