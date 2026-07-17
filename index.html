@@ -555,7 +555,39 @@ function populateRange(period){
     }
   }
 }
+function renderLiveNums(L){
+  const kwv2=w=>w==null?'–':(Math.abs(w)/1000).toFixed(1);
+  el('q_solar_now').innerHTML=kwv2(L.solar_power)+'<small>kW</small>';
+  el('q_home_now').innerHTML=kwv2(L.load_power)+'<small>kW</small>';
+  el('q_batt_now').innerHTML=kwv2(L.battery_power)+'<small>kW</small>';
+  el('q_grid_now').innerHTML=kwv2(L.grid_power)+'<small>kW</small>';
+  const soc=L.percentage_charged||0;
+  el('q_socbar').style.width=soc.toFixed(0)+'%';
+  el('q_batt_status').textContent=soc.toFixed(0)+'% · '+(L.battery_power>50?'Discharging':(L.battery_power<-50?'Charging':'Idle'));
+  el('q_grid_status').textContent=L.grid_power>50?'Importing':(L.grid_power<-50?'Exporting':'Idle');
+}
+/* ---- live stream: Durable Object pushes Tesla live_status every ~10s ---- */
+let WS=null,WSTIMER=null;
+function startLive(){
+  if(WS||!PASS)return;
+  let s;
+  try{s=new WebSocket(WORKER.replace('https','wss')+'/live')}catch(e){return}
+  WS=s;
+  s.onopen=()=>{try{s.send(JSON.stringify({auth:PASS}))}catch(e){}};
+  s.onmessage=ev=>{
+    let j={};try{j=JSON.parse(ev.data)}catch(e){return}
+    if(j.type==='live'&&j.live){
+      if(LAST)LAST.live=j.live;
+      renderLiveNums(j.live);
+      renderFlow(j.live);
+      el('updated').textContent='Updated '+new Date(j.t).toLocaleString()+' · live';
+    }
+  };
+  s.onclose=()=>{WS=null;clearTimeout(WSTIMER);WSTIMER=setTimeout(startLive,15000)};
+  s.onerror=()=>{try{s.close()}catch(e){}};
+}
 function renderQuads(d){
+  startLive();
   const period=val('period');
   el('range').hidden=false;
   populateRange(period);
@@ -571,14 +603,7 @@ function renderQuads(d){
   const homeOf=r=>((r.consumer_energy_imported_from_grid||0)+(r.consumer_energy_imported_from_solar||0)+(r.consumer_energy_imported_from_battery||0));
   const netOf=r=>((r.grid_energy_imported||0)-((r.grid_energy_exported_from_solar||0)+(r.grid_energy_exported_from_battery||0)));
 
-  el('q_solar_now').innerHTML=kwv(L.solar_power)+'<small>kW</small>';
-  el('q_home_now').innerHTML=kwv(L.load_power)+'<small>kW</small>';
-  el('q_batt_now').innerHTML=kwv(L.battery_power)+'<small>kW</small>';
-  el('q_grid_now').innerHTML=kwv(L.grid_power)+'<small>kW</small>';
-  const soc=L.percentage_charged||0;
-  el('q_socbar').style.width=soc.toFixed(0)+'%';
-  el('q_batt_status').textContent=soc.toFixed(0)+'% · '+(L.battery_power>50?'Discharging':(L.battery_power<-50?'Charging':'Idle'));
-  el('q_grid_status').textContent=L.grid_power>50?'Importing':(L.grid_power<-50?'Exporting':'Idle');
+  renderLiveNums(L);
 
   if(period==='day'){
     let h;
