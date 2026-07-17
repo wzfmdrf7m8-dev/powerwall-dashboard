@@ -513,6 +513,7 @@ function renderNet(d){
       if(s0.getFullYear()+'-'+String(s0.getMonth()+1).padStart(2,'0')+'-'+String(s0.getDate()).padStart(2,'0')===today)
         covEnd=Math.max(covEnd,Date.parse(c.interval_end||c.interval_start));
     }
+    if(mr&&mr.cov)covEnd=Math.max(covEnd,mr.cov); // telemetry coverage marker from the worker
     if(h.length||mr){
       const expRates=((d.octopus||{}).export||{}).rates||[];
       const expR=rateFor(expRates,new Date().toISOString())??12;
