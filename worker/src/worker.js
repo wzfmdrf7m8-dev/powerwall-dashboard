@@ -576,37 +576,39 @@ async function pollCycle(env, state, opts = {}) {
       if (state.ledgerFillCursor > 370) state.ledgerFillDone = 1;
     } catch (e) { log.push("ledgerfill error: " + String(e).slice(0, 100)); }
   }
-  // per-day 15-min bins for the dashboard day picker: one-off fill of the past
-  // 31 days from Tesla's stored 5-min history (recent days come from hist below)
-  if (!state.dayBinsFillDone && state.ledgerFillDone && !heavyTick) {
+  // per-day 15-min bins for the dashboard day picker: self-healing scan — any day
+  // in the last 35 with missing/sparse bins is refetched from Tesla's 5-min history
+  // (merged under existing live bins, which carry EV data Tesla can't see)
+  if (state.ledgerFillDone && !heavyTick && now - (state.lastBinScan || 0) > 1800) {
+    state.lastBinScan = now;
     try {
       state.dayBins = state.dayBins || {};
-      state.dayBinsCursor = state.dayBinsCursor ?? 2;
       let n = 0;
-      while (n < 6 && state.dayBinsCursor <= 31) {
-        const d = new Date(Date.now() - state.dayBinsCursor * 864e5);
+      for (let off = 1; off <= 35 && n < 3; off++) {
+        const d = new Date(Date.now() - off * 864e5);
         const dKey = londonDayEndISO(d).slice(0, 10);
-        if (!state.dayBins[dKey]) {
-          const r = await tesla(env, state, "GET", `/api/1/energy_sites/${sid}/calendar_history`, null,
-            { kind: "power", period: "day", end_date: londonDayEndISO(d), time_zone: TZ });
-          const sums = Array(96).fill(null), cnt = Array(96).fill(0);
-          for (const row of (r || {}).time_series || []) {
-            const ts = row.timestamp || "";
-            const idx = parseInt(ts.slice(11, 13), 10) * 4 + Math.floor(parseInt(ts.slice(14, 16), 10) / 15);
-            if (!(idx >= 0 && idx < 96)) continue;
-            const b = (sums[idx] = sums[idx] || [0, 0, 0, 0, 0]);
-            const so = row.solar_power || 0, ba = row.battery_power || 0, gr = row.grid_power || 0;
-            b[0] += so; b[1] += row.load_power != null ? row.load_power : so + ba + gr;
-            b[2] += gr; b[3] += ba; cnt[idx]++;
-          }
-          if (cnt.some((c) => c > 0))
-            state.dayBins[dKey] = sums.map((b, i) => (b && cnt[i] ? b.map((v) => Math.round(v / cnt[i])) : null));
-          n++;
+        const existing = state.dayBins[dKey];
+        const filled = existing ? existing.filter(Boolean).length : 0;
+        if (filled >= 88) continue; // effectively complete
+        const r = await tesla(env, state, "GET", `/api/1/energy_sites/${sid}/calendar_history`, null,
+          { kind: "power", period: "day", end_date: londonDayEndISO(d), time_zone: TZ });
+        const sums = Array(96).fill(null), cnt = Array(96).fill(0);
+        for (const row of (r || {}).time_series || []) {
+          const ts = row.timestamp || "";
+          const idx = parseInt(ts.slice(11, 13), 10) * 4 + Math.floor(parseInt(ts.slice(14, 16), 10) / 15);
+          if (!(idx >= 0 && idx < 96)) continue;
+          const b = (sums[idx] = sums[idx] || [0, 0, 0, 0, 0]);
+          const so = row.solar_power || 0, ba = row.battery_power || 0, gr = row.grid_power || 0;
+          b[0] += so; b[1] += row.load_power != null ? row.load_power : so + ba + gr;
+          b[2] += gr; b[3] += ba; cnt[idx]++;
         }
-        state.dayBinsCursor++;
+        if (cnt.some((c) => c > 0)) {
+          const fresh = sums.map((b, i) => (b && cnt[i] ? b.map((v) => Math.round(v / cnt[i])) : null));
+          // live bins win (they include EV); Tesla fills the gaps
+          state.dayBins[dKey] = fresh.map((f, i) => (existing && existing[i]) || f);
+          state.binsDirty = 1; n++;
+        }
       }
-      if (state.dayBinsCursor > 31) state.dayBinsFillDone = 1;
-      if (n > 0) state.binsDirty = 1;
     } catch (e) { log.push("daybins error: " + String(e).slice(0, 100)); }
   }
   // dedupe + trim
@@ -646,8 +648,12 @@ async function pollCycle(env, state, opts = {}) {
         b[0] += p.solar || 0; b[1] += p.load || 0; b[2] += p.grid || 0; b[3] += p.battery || 0; b[4] += p.ev || 0;
         C[idx]++;
       }
-      for (const dk of Object.keys(sums))
-        bins[dk] = sums[dk].map((b, i) => (b && cnts[dk][i] ? b.map((v) => Math.round(v / cnts[dk][i])) : null));
+      for (const dk of Object.keys(sums)) {
+        const fresh = sums[dk].map((b, i) => (b && cnts[dk][i] ? b.map((v) => Math.round(v / cnts[dk][i])) : null));
+        // merge: never wipe a day's earlier hours just because they've left the hist window
+        const old = bins[dk];
+        bins[dk] = fresh.map((f, i) => f || (old && old[i]) || null);
+      }
       const keys = Object.keys(bins).sort();
       for (const k of keys.slice(0, Math.max(0, keys.length - 35))) delete bins[k];
       state.binsDirty = 1;
