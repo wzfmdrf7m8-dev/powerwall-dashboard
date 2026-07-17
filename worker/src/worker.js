@@ -49,6 +49,11 @@ function londonDayEndISO(d) {
   const offset = localOffsetISO(d).slice(19) || "+00:00";
   return `${p.year}-${p.month}-${p.day}T23:59:59${offset}`;
 }
+function londonDayStartISO(d) {
+  const p = londonParts(d);
+  const offset = localOffsetISO(d).slice(19) || "+00:00";
+  return `${p.year}-${p.month}-${p.day}T00:00:00${offset}`;
+}
 
 /* ---------------- crypto (matches dashboard: salt16|iv16|AES-CBC(PKCS7)) ---------------- */
 const te = new TextEncoder(), td = new TextDecoder();
@@ -89,6 +94,12 @@ async function loadState(env) {
   // one-time migration (2026-07-17): statements showed our rates were wrong — refill
   // the year pricing each period under its actual agreement (per-agreement rates)
   if (!state.mig_agr1) { state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0; state.mig_agr1 = 1; }
+  // one-time migration (2026-07-17b): refill once more with midnight-aligned chunks
+  // (mid-day chunk cuts corrupted boundary days) — also reset the cursor mirror
+  if (!state.mig_agr2) {
+    state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0; state.mig_agr2 = 1;
+    try { await env.PW.delete("octofill.txt"); } catch (e) {}
+  }
   // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
   state.keySalt = env.DASH_SALT_B64;
   state.keyRaw = env.DASH_KEY_B64;
@@ -193,10 +204,12 @@ async function fetchOctopus(env, state) {
       try { const o = await env.PW.get("octofill.txt"); if (o) { const v = parseInt(await o.text(), 10); if (v > 35) state.octoFillCursor = v; } } catch (e) {}
     }
     const cur = (state.octoFillCursor = state.octoFillCursor ?? 370); // days ago, counts down
-    start = new Date(Date.now() - cur * 864e5).toISOString();
-    chunkEnd = new Date(Date.now() - Math.max(0, cur - CHUNK) * 864e5).toISOString();
+    // chunk boundaries at LOCAL midnight — a mid-day cut leaves partial days that
+    // overwrite the other half, silently dropping the overnight cheap-rate usage
+    start = londonDayStartISO(new Date(Date.now() - cur * 864e5));
+    chunkEnd = londonDayStartISO(new Date(Date.now() - Math.max(0, cur - CHUNK) * 864e5));
   } else {
-    start = new Date(Date.now() - 35 * 864e5).toISOString();
+    start = londonDayStartISO(new Date(Date.now() - 35 * 864e5));
   }
   // half-hours our poller saw as IO-slot/car-charging (billed off-peak on Intelligent Octopus)
   const ioSet = new Set();
