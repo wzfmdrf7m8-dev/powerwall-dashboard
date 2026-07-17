@@ -503,22 +503,34 @@ function renderNet(d){
       else label=selDay;
     }else{
     const h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
-    label='Today · live';
-    if(h.length){
+    // anchor on Octopus's metered half-hours for today (they see the EV circuit and
+    // survive collector outages); live-price only the hours the meter hasn't reported yet
+    const mr=mergedOcto(d).find(x=>x.d===today);
+    let covEnd=0;
+    for(const c of (((d.octopus||{}).import||{}).consumption)||[]){
+      if(!c.interval_start)continue;
+      const s0=new Date(c.interval_start);
+      if(s0.getFullYear()+'-'+String(s0.getMonth()+1).padStart(2,'0')+'-'+String(s0.getDate()).padStart(2,'0')===today)
+        covEnd=Math.max(covEnd,Date.parse(c.interval_end||c.interval_start));
+    }
+    if(h.length||mr){
       const expRates=((d.octopus||{}).export||{}).rates||[];
       const expR=rateFor(expRates,new Date().toISOString())??12;
       let cost=0,earn=0,prev=null;
       for(const p of h){
         let dtH=1/60;
         if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
+        prev=p;
+        if(mr&&+new Date(p.t)<=covEnd)continue; // metered already covers this minute
         cost+=Math.max(p.grid||0,0)*dtH/1000*sampleRate(p);
         // the Ohme circuit bypasses Tesla's CTs — its import is invisible to p.grid
         cost+=Math.max(p.ev||0,0)*dtH/1000*sampleRate(p);
         earn+=Math.max(-(p.grid||0),0)*dtH/1000*expR;
-        prev=p;
       }
-      imp=cost; exp=earn;
-      stand=(d.octopus||{}).standing_now||0;
+      imp=(mr?(mr.impCost||0):0)+cost;
+      exp=(mr?(mr.expEarn||0):0)+earn;
+      stand=(mr&&mr.standing)||(d.octopus||{}).standing_now||0;
+      label=mr?'Today · metered + live':'Today · live';
       net=imp+stand-exp;
     }
     }
