@@ -691,9 +691,14 @@ async function pollCycle(env, state, opts = {}) {
       if (log.length) { state.siteInfo = await tesla(env, state, "GET", `/api/1/energy_sites/${sid}/site_info`); state.lastLog = log; }
     } catch (e) { log.push("automation error: " + String(e).slice(0, 120)); }
   }
-  if (!state.energyDaily || now - (state.lastEnergy || 0) > 1800 || opts.force) {
+  // daily energy counters refresh fast (5 min) so today's totals track NetZero/Tesla;
+  // the heavier self-heal work below stays on the 30-min cadence
+  if (!state.energyDaily || now - (state.lastEnergy || 0) > 300 || opts.force) {
     try { state.energyDaily = await fetchEnergyDaily(env, state, sid); state.lastEnergy = now; }
     catch (e) { log.push("energy error: " + String(e).slice(0, 120)); }
+  }
+  if (now - (state.lastHeavy || 0) > 1800 || opts.force) {
+    state.lastHeavy = now;
     // self-heal intraday chart gaps from Tesla's stored 5-min power history
     try { await backfillHistory(env, state, sid); state.hist = state.hist.slice(-HIST_MAX); }
     catch (e) { log.push("autofill error: " + String(e).slice(0, 120)); }
