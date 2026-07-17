@@ -100,6 +100,12 @@ async function loadState(env) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0; state.mig_agr2 = 1;
     try { await env.PW.delete("octofill.txt"); } catch (e) {}
   }
+  // one-time migration (2026-07-17c): refill with big-draw slot repricing (historical
+  // IO smart-charge slots billed at night rate — imports were overstated ~30%)
+  if (!state.mig_agr3) {
+    state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0; state.mig_agr3 = 1;
+    try { await env.PW.delete("octofill.txt"); } catch (e) {}
+  }
   // key material is pre-derived at deploy time (PBKDF2 is too heavy for worker CPU limits)
   state.keySalt = env.DASH_SALT_B64;
   state.keyRaw = env.DASH_KEY_B64;
@@ -282,7 +288,11 @@ async function fetchOctopus(env, state) {
         if (kind === "import") {
           const dayMin = minRateAt(ts, dy);
           const localKey = lm.slice(0, 16);
-          if (ioSet.has(localKey) && dayMin != null) rate = dayMin; // IO bonus slot repricing
+          // Intelligent Octopus bills smart-charge slots at the night rate even outside
+          // the window. Historical slots aren't in the API, but only EV/Powerwall
+          // charging sustains ≥4 kW for a half-hour — reprice those (≥2 kWh/HH).
+          const bigDraw = (c.consumption || 0) >= 2.0;
+          if ((ioSet.has(localKey) || bigDraw) && dayMin != null) rate = dayMin;
           if (rate == null) rate = dayMin ?? 5.62;
           d.impKwh += c.consumption;
           d.impCost += c.consumption * rate;
