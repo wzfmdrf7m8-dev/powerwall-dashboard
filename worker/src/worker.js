@@ -498,7 +498,7 @@ function rebuildLedgerDay(state, dKey) {
     }
     const hm = p.t.slice(11, 16);
     const off = (hm >= "23:30" || hm < "05:30") || p.io || (p.ev || 0) > 250;
-    const imp = Math.max(p.grid || 0, 0), ex = Math.max(-(p.grid || 0), 0);
+    const imp = Math.max(p.grid || 0, 0) + (p.ev || 0), ex = Math.max(-(p.grid || 0), 0);
     const basis = Math.max(p.load || 0, 0) + Math.max(-(p.battery || 0), 0) + (p.ev || 0);
     if (off) { day.impOff += imp * dt; day.basisOff += basis * dt; }
     else { day.impPeak += imp * dt; day.basisPeak += basis * dt; }
@@ -532,7 +532,8 @@ async function pollCycle(env, state, opts = {}) {
     const L = (state.ledger = state.ledger || {});
     const day = (L[dKey] = L[dKey] || { impOff: 0, impPeak: 0, basisOff: 0, basisPeak: 0, exp: 0 });
     const dt = 1 / 60;
-    const impW = Math.max(live.grid_power || 0, 0), expW = Math.max(-(live.grid_power || 0), 0);
+    // the Ohme circuit bypasses Tesla's CTs: its draw is real grid import too
+    const impW = Math.max(live.grid_power || 0, 0) + evW, expW = Math.max(-(live.grid_power || 0), 0);
     const basisW = Math.max(live.load_power || 0, 0) + Math.max(-(live.battery_power || 0), 0) + evW;
     if (off) { day.impOff += impW * dt; day.basisOff += basisW * dt; }
     else { day.impPeak += impW * dt; day.basisPeak += basisW * dt; }
