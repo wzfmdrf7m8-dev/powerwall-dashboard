@@ -602,12 +602,14 @@ function renderQuads(d){
       bin('pwexp',idx,Math.min(Math.max(p.battery||0,0),Math.max(-(p.grid||0),0)));
     }
     const series=key=>mk().map((_,i)=>cnts[key]&&cnts[key][i]?sums[key][i]/cnts[key][i]/1000:null);
-    el('q_solar_tot').innerHTML=kwhv(td.solar_energy_exported)+'<small>kWh</small>';
+    el('q_solar_tot').innerHTML=kwhv(td.timestamp?(td.solar_energy_exported||0)+(td.grid_energy_exported_from_battery||0):null)+'<small>kWh solar + PW</small>';
     el('q_home_tot').innerHTML=kwhv(td.timestamp?homeOf(td):null)+'<small>kWh</small>';
     el('q_batt_tot').innerHTML=kwhv(td.battery_energy_exported)+'<small>kWh</small>';
     el('q_grid_tot').innerHTML=kwhv(td.timestamp?netOf(td):null)+'<small>kWh</small>';
-    const solarSeries=[{label:'Solar kW',data:series('solar'),color:'rgb(255,149,0)'},
-      {label:'PW export kW',data:series('pwexp'),color:'rgb(52,199,89)'}];
+    const sS=series('solar'),pS=series('pwexp');
+    const solarSeries=[{label:'Solar kW',data:sS,color:'rgb(255,149,0)'},
+      {label:'PW export kW',data:pS,color:'rgb(52,199,89)'},
+      {label:'Total kW',data:sS.map((v,i)=>v==null&&pS[i]==null?null:(v||0)+(pS[i]||0)),color:'rgb(88,86,214)',dash:[6,3]}];
     const fc=d.solar_forecast||[];
     if(fc.length&&isToday){
       const est=Array(96).fill(null);
@@ -642,7 +644,7 @@ function renderQuads(d){
     let c=0,covered=0;
     for(const dy of dayKeys){const g=led[dy];if(!g)continue;covered++;c+=(g.basisOff*TARIFF.offpeak+g.basisPeak*TARIFF.peak)/1000}
     el('q_home_cost').textContent=covered?('≈ '+gbp(c)+' direct'+(covered<dayKeys.length?` (${covered}/${dayKeys.length} days)`:'')):'';
-    el('q_solar_tot').innerHTML=kwhv(sum(r=>r.solar_energy_exported))+'<small>kWh</small>';
+    el('q_solar_tot').innerHTML=kwhv(sumSolar!=null?sumSolar+sumBattExp:null)+'<small>kWh solar + PW</small>';
     el('q_home_tot').innerHTML=kwhv(sum(homeOf))+'<small>kWh</small>';
     el('q_batt_tot').innerHTML=kwhv(sum(r=>r.battery_energy_exported))+'<small>kWh</small>';
     el('q_grid_tot').innerHTML=kwhv(sum(netOf))+'<small>kWh</small>';
