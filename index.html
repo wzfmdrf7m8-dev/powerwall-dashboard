@@ -795,6 +795,12 @@ async function unlock(pass){
     PASS=p; el('overlay').style.display='none';
     localStorage.setItem('pw_pass',p);
     if(!refresher) refresher=setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},30*1000);
+    // NetZero-style freshness: nudge the worker for a full refresh on open,
+    // then pull the rebuilt bundle a few seconds later
+    fetch(`${WORKER}/cmd`,{method:'POST',headers:{'Content-Type':'application/json','x-auth':p},
+      body:JSON.stringify({command:'poll',value:''})})
+      .then(()=>new Promise(r=>setTimeout(r,4000)))
+      .then(()=>loadData(PASS)).then(d=>render(d)).catch(()=>{});
   }catch(e){el('pwerr').textContent=e.name==='OperationError'?'Wrong password':e.message}
 }
 function lockNow(){
@@ -806,6 +812,17 @@ window.addEventListener('load',()=>{
   const saved=localStorage.getItem('pw_pass');
   if(saved) unlock(saved);
   if(localStorage.getItem('pw_pat')) el('pat').value=localStorage.getItem('pw_pat');
+});
+// phone app resuming from background: same refresh-on-open nudge (throttled)
+let lastNudge=0;
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&PASS&&Date.now()-lastNudge>300000){
+    lastNudge=Date.now();
+    fetch(`${WORKER}/cmd`,{method:'POST',headers:{'Content-Type':'application/json','x-auth':PASS},
+      body:JSON.stringify({command:'poll',value:''})})
+      .then(()=>new Promise(r=>setTimeout(r,4000)))
+      .then(()=>loadData(PASS)).then(d=>render(d)).catch(()=>{});
+  }
 });
 el('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
 function savePat(){localStorage.setItem('pw_pat',val('pat'));el('cmderr').innerHTML='<span class="ok">Token saved in this browser.</span>'}
