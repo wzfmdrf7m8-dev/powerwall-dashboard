@@ -533,6 +533,7 @@ async function pollCycle(env, state, opts = {}) {
         state.dayBinsCursor++;
       }
       if (state.dayBinsCursor > 31) state.dayBinsFillDone = 1;
+      if (n > 0) state.binsDirty = 1;
     } catch (e) { log.push("daybins error: " + String(e).slice(0, 100)); }
   }
   // dedupe + trim
@@ -576,6 +577,7 @@ async function pollCycle(env, state, opts = {}) {
         bins[dk] = sums[dk].map((b, i) => (b && cnts[dk][i] ? b.map((v) => Math.round(v / cnts[dk][i])) : null));
       const keys = Object.keys(bins).sort();
       for (const k of keys.slice(0, Math.max(0, keys.length - 35))) delete bins[k];
+      state.binsDirty = 1;
     } catch (e) {}
     // solar forecast: Open-Meteo irradiance scaled to this system's observed peak
     try {
@@ -613,7 +615,6 @@ async function pollCycle(env, state, opts = {}) {
          nameplate_energy, battery_count, user_settings, components }))(state.siteInfo || {}),
     energy_daily: state.energyDaily || [],
     solar_forecast: state.solarForecast || [],
-    day_bins: state.dayBins || {},
     ledger: state.ledger || {},
     history: state.hist,
     automations: state.config,
@@ -624,6 +625,12 @@ async function pollCycle(env, state, opts = {}) {
   };
   const enc = await encryptBundle(state, bundle);
   await env.PW.put("dashboard.enc", enc);
+  // day bins live in their own blob, written only when they change (~every 30 min)
+  // — keeps the every-minute encrypt small and the CPU per tick down
+  if (state.binsDirty) {
+    await env.PW.put("daybins.enc", await encryptBundle(state, { day_bins: state.dayBins || {} }));
+    state.binsDirty = 0;
+  }
   await saveState(env, state);
   console.log("wrote dashboard.enc", enc.length, "chars,", state.hist.length, "samples");
   return log;
@@ -704,6 +711,13 @@ export default {
         headers: { ...CORS, "Content-Type": "text/plain", "Cache-Control": "no-store",
           "x-updated": (obj.uploaded ? new Date(obj.uploaded).toISOString() : ""),
           "Access-Control-Expose-Headers": "x-updated" },
+      });
+    }
+    if (url.pathname === "/daybins") {
+      const obj = await env.PW.get("daybins.enc");
+      if (!obj) return new Response("no data yet", { status: 404, headers: CORS });
+      return new Response(await obj.text(), {
+        headers: { ...CORS, "Content-Type": "text/plain", "Cache-Control": "no-store" },
       });
     }
     if (url.pathname === "/health") {
