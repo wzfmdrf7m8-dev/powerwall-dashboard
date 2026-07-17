@@ -7,7 +7,7 @@ const TESLA_TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/tok
 const OHME_GOOGLE_KEY = "AIzaSyC8ZeZngm33tpOXLpbXeKfwtyZ1WrkbdBY";
 const REPO_RAW = "https://raw.githubusercontent.com/wzfmdrf7m8-dev/powerwall-dashboard";
 const TZ = "Europe/London";
-const HIST_MAX = 2880;
+const HIST_MAX = 1600; // ~26h of minutes; older days are served from day_bins instead
 
 const DEFAULT_CONFIG = {
   enabled: false,
@@ -184,12 +184,17 @@ async function fetchOctopus(env, state) {
   // deep fill: pull the past year in 45-day chunks (one per tick — a whole year of
   // half-hourly rows in one invocation exceeds the Worker CPU limit), then 35-day top-ups
   const deep = !(state && state.octoDeepFill);
+  const CHUNK = 12; // days per tick — bigger chunks exceed the Worker CPU budget
   let chunkEnd = null;
   let start;
   if (deep) {
+    // resume from the tiny cursor mirror if the last tick died before saving state
+    if (state.octoFillCursor == null) {
+      try { const o = await env.PW.get("octofill.txt"); if (o) { const v = parseInt(await o.text(), 10); if (v > 35) state.octoFillCursor = v; } } catch (e) {}
+    }
     const cur = (state.octoFillCursor = state.octoFillCursor ?? 370); // days ago, counts down
     start = new Date(Date.now() - cur * 864e5).toISOString();
-    chunkEnd = new Date(Date.now() - Math.max(0, cur - 45) * 864e5).toISOString();
+    chunkEnd = new Date(Date.now() - Math.max(0, cur - CHUNK) * 864e5).toISOString();
   } else {
     start = new Date(Date.now() - 35 * 864e5).toISOString();
   }
@@ -289,7 +294,9 @@ async function fetchOctopus(env, state) {
   Object.assign(merged, daily);
   out.daily = Object.keys(merged).sort().map((k) => merged[k]).slice(-370);
   if (state && deep) {
-    state.octoFillCursor = Math.max(35, (state.octoFillCursor ?? 370) - 45);
+    state.octoFillCursor = Math.max(35, (state.octoFillCursor ?? 370) - CHUNK);
+    // persist progress instantly — a later CPU overrun must not rewind the fill
+    try { await env.PW.put("octofill.txt", String(state.octoFillCursor)); } catch (e) {}
     if (state.octoFillCursor <= 35) { state.octoDeepFill = 1; delete state.octoFillCursor; }
   }
   return out;
