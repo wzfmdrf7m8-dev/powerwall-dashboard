@@ -512,6 +512,8 @@ function renderNet(d){
         let dtH=1/60;
         if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
         cost+=Math.max(p.grid||0,0)*dtH/1000*sampleRate(p);
+        // the Ohme circuit bypasses Tesla's CTs — its import is invisible to p.grid
+        cost+=Math.max(p.ev||0,0)*dtH/1000*sampleRate(p);
         earn+=Math.max(-(p.grid||0),0)*dtH/1000*expR;
         prev=p;
       }
@@ -640,13 +642,14 @@ function renderQuads(d){
     // costs: solar = total generated × export rate; home = total used × import rate
     // (off-peak in the window, during EV smart-charge slots, or while car charging)
     const expRates=((d.octopus||{}).export||{}).rates||[];
-    let homeCost=0,solarVal=0,prev=null;
+    let homeCost=0,solarVal=0,evKwh=0,prev=null;
     for(const p of h){
       let dtH=1/60;
       if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000; if(dt>0&&dt<=0.5) dtH=dt}
       const expR=rateFor(expRates,new Date(p.t).toISOString())??12;
       const basis=Math.max(p.load||0,0)+Math.max(-(p.battery||0),0)+Math.max(p.ev||0,0);
       homeCost+=basis*dtH/1000*sampleRate(p);
+      evKwh+=Math.max(p.ev||0,0)*dtH/1000;
       // export value: solar generation + Powerwall discharge that reached the grid
       const battToGrid=Math.min(Math.max(p.battery||0,0),Math.max(-(p.grid||0),0));
       solarVal+=(Math.max(p.solar||0,0)+battToGrid)*dtH/1000*expR;
@@ -655,7 +658,8 @@ function renderQuads(d){
     el('q_home_cost').textContent=h.length?'≈ '+gbp(homeCost)+' inc. Powerwall & EV':'';
     el('q_solar_val').textContent=h.length?'≈ '+gbp(solarVal)+' export value (solar + PW)':'';
     const dayExp=td.timestamp?((td.grid_energy_exported_from_solar||0)+(td.grid_energy_exported_from_battery||0)):null;
-    el('q_grid_exp').textContent=dayExp!=null?'↓ '+((td.grid_energy_imported||0)/1000).toFixed(1)+' kWh imported · ↑ '+(dayExp/1000).toFixed(1)+' kWh exported (solar + PW)':'';
+    // Ohme circuit bypasses Tesla's CTs — add its draw for a meter-comparable import
+    el('q_grid_exp').textContent=dayExp!=null?'↓ '+(((td.grid_energy_imported||0)/1000)+evKwh).toFixed(1)+' kWh imported'+(evKwh>0.05?' (incl. EV '+evKwh.toFixed(1)+')':'')+' · ↑ '+(dayExp/1000).toFixed(1)+' kWh exported':'';
     // full 24h axis: bucket samples into 15-min bins, gaps where no data
     const labels=[],mk=()=>Array(96).fill(null),sums={},cnts={};
     for(let i=0;i<96;i++) labels.push(String(Math.floor(i/4)).padStart(2,'0')+':'+String((i%4)*15).padStart(2,'0'));
