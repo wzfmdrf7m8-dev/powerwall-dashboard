@@ -342,42 +342,78 @@ async function fetchOctopus(env, state) {
           d.impCost += c.consumption * rate;
           if (dayMin != null && rate <= dayMin + 0.01) d.offKwh += c.consumption; else d.peakKwh += c.consumption;
           d.cov = Math.max(d.cov || 0, Date.parse(c.interval_end || c.interval_start) || 0);
+          d.nImp = (d.nImp || 0) + 1;
         } else {
           if (rate == null) rate = 12;
           d.expKwh += c.consumption;
           d.expEarn += c.consumption * rate;
+          d.nExp = (d.nExp || 0) + 1;
         }
-      }
-      // today: the REST feed lags ~a day — fill from Home Mini live telemetry (import only;
-      // it prices with the same dated rates + smart-slot logic, and REST replaces it tomorrow)
-      if (kind === "import" && !chunkEnd) {
-        try {
-          const todayKey = localMinuteISO().slice(0, 10);
-          if (!daily[todayKey]) {
-            const devId = await krakenDeviceId(env, state);
-            const tel = await krakenGQL(env, state,
-              "query($d:String!,$s:DateTime!,$e:DateTime!){smartMeterTelemetry(deviceId:$d,grouping:HALF_HOURLY,start:$s,end:$e){readAt consumptionDelta}}",
-              { d: devId, s: new Date(Date.parse(londonDayStartISO(new Date()))).toISOString(), e: new Date().toISOString() });
-            for (const row of (tel || {}).smartMeterTelemetry || []) {
-              const kwh = (parseFloat(row.consumptionDelta) || 0) / 1000; // Wh → kWh
-              const ts = Date.parse(row.readAt);
-              if (!(kwh > 0) || !ts) continue;
-              const lm2 = localMinuteISO(new Date(ts));
-              if (lm2.slice(0, 10) !== todayKey) continue;
-              const dd = (daily[todayKey] = daily[todayKey] || { d: todayKey, impKwh: 0, impCost: 0, offKwh: 0, peakKwh: 0, expKwh: 0, expEarn: 0, telemetry: 1 });
-              let rate = rateAtEpoch(rates, ts);
-              const dayMin = minRateAt(ts, todayKey);
-              if ((ioSet.has(lm2.slice(0, 16)) || kwh >= 2.0) && dayMin != null) rate = dayMin;
-              if (rate == null) rate = dayMin ?? 5.9;
-              dd.impKwh += kwh; dd.impCost += kwh * rate;
-              if (dayMin != null && rate <= dayMin + 0.01) dd.offKwh += kwh; else dd.peakKwh += kwh;
-              dd.cov = Math.max(dd.cov || 0, ts + 1800e3);
-            }
-          }
-        } catch (e) { /* no Home Mini / telemetry hiccup — REST catches up tomorrow */ }
       }
       out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: rates.slice(-200) };
     }
+  }
+  // last-2-days accuracy: Octopus's REST feeds lag (imports ~a day, exports worse).
+  // Home Mini telemetry closes the gap — consumptionDelta (Wh) for imports, the
+  // cumulative export register for exports. REST takes over once a day is complete.
+  if (!chunkEnd) {
+    try {
+      const impRates = ((out.import || {}).rates) || [];
+      const expRates = ((out.export || {}).rates) || [];
+      const dayKeys = [0, 1].map((n) => localMinuteISO(new Date(Date.now() - n * 864e5)).slice(0, 10));
+      const needImp = dayKeys.filter((k) => !daily[k] || (daily[k].nImp || 0) < 46);
+      const needExp = dayKeys.filter((k) => !daily[k] || (daily[k].nExp || 0) < 46);
+      if (needImp.length || needExp.length) {
+        const devId = await krakenDeviceId(env, state);
+        const s = new Date(Date.parse(londonDayStartISO(new Date(Date.now() - 864e5))) - 1800e3);
+        const tel = await krakenGQL(env, state,
+          "query($d:String!,$s:DateTime!,$e:DateTime!){smartMeterTelemetry(deviceId:$d,grouping:HALF_HOURLY,start:$s,end:$e){readAt consumptionDelta export}}",
+          { d: devId, s: s.toISOString(), e: new Date().toISOString() });
+        const rows = ((tel || {}).smartMeterTelemetry || []).filter((r) => r.readAt).sort((a, b) => (a.readAt < b.readAt ? -1 : 1));
+        const dayMinCache = {};
+        const minFor = (dy) => {
+          if (dy in dayMinCache) return dayMinCache[dy];
+          let m = null;
+          for (const r of impRates) {
+            const f = Date.parse(r.valid_from || 0), t = r.valid_to ? Date.parse(r.valid_to) : null;
+            if (t && t - f <= 2 * 864e5)
+              for (const ms of [f, t - 1])
+                if (localMinuteISO(new Date(ms)).slice(0, 10) === dy && (m == null || r.value_inc_vat < m)) m = r.value_inc_vat;
+          }
+          return (dayMinCache[dy] = m);
+        };
+        const blank = (k) => (daily[k] = daily[k] || { d: k, impKwh: 0, impCost: 0, offKwh: 0, peakKwh: 0, expKwh: 0, expEarn: 0 });
+        for (const k of needImp) { const dd = blank(k); dd.impKwh = dd.impCost = dd.offKwh = dd.peakKwh = 0; dd.telemetry = 1; }
+        for (const k of needExp) { const dd = blank(k); dd.expKwh = dd.expEarn = 0; dd.telemetry = 1; }
+        let prevReg = null;
+        for (const row of rows) {
+          const ts = Date.parse(row.readAt);
+          if (!ts) continue;
+          const lm2 = localMinuteISO(new Date(ts));
+          const dy = lm2.slice(0, 10);
+          const kwh = (parseFloat(row.consumptionDelta) || 0) / 1000;
+          if (needImp.includes(dy) && kwh > 0) {
+            const dd = daily[dy];
+            let rate = rateAtEpoch(impRates, ts);
+            const dm = minFor(dy);
+            if ((ioSet.has(lm2.slice(0, 16)) || kwh >= 2.0) && dm != null) rate = dm;
+            if (rate == null) rate = dm ?? 5.9;
+            dd.impKwh += kwh; dd.impCost += kwh * rate;
+            if (dm != null && rate <= dm + 0.01) dd.offKwh += kwh; else dd.peakKwh += kwh;
+            dd.cov = Math.max(dd.cov || 0, ts + 1800e3);
+          }
+          const reg = parseFloat(row.export);
+          if (!isNaN(reg)) {
+            if (prevReg != null && reg > prevReg && needExp.includes(dy)) {
+              const ek = (reg - prevReg) / 1000;
+              const dd = daily[dy];
+              dd.expKwh += ek; dd.expEarn += ek * (rateAtEpoch(expRates, ts) ?? 12);
+            }
+            prevReg = reg;
+          }
+        }
+      }
+    } catch (e) { /* no Home Mini / telemetry hiccup — REST catches up */ }
   }
   // per-day standing charge from the dated tariff schedule
   for (const k of Object.keys(daily)) {
