@@ -698,6 +698,13 @@ async function pollCycle(env, state, opts = {}) {
   };
   const enc = await encryptBundle(state, bundle);
   await env.PW.put("dashboard.enc", enc);
+  // tiny access snapshot for the live-streaming Durable Object (never refreshes
+  // tokens itself — avoids racing the single-use refresh-token rotation)
+  try {
+    await env.PW.put("access.json", JSON.stringify({
+      access_token: state.access_token, access_exp: state.access_exp, siteId: state.siteId,
+    }));
+  } catch (e) {}
   // archive blob (day bins + full daily history), written only when it changes
   // (~every 30 min) — keeps the every-minute encrypt small and CPU per tick down
   if (state.binsDirty) {
@@ -756,6 +763,68 @@ async function runCommand(env, state, command, value) {
   return log;
 }
 
+/* ---------------- live streaming (Durable Object) ---------------- */
+// Holds dashboard/app WebSockets; while anyone is connected it polls Tesla's
+// live_status every 10s and broadcasts. Reads the cron-maintained access token
+// snapshot — it must NEVER refresh tokens itself (single-use rotation).
+export class LiveHub {
+  constructor(state, env) { this.state = state; this.env = env; }
+  async fetch(request) {
+    if (request.headers.get("Upgrade") !== "websocket")
+      return new Response("expected websocket", { status: 426 });
+    const pair = new WebSocketPair();
+    const [client, server] = [pair[0], pair[1]];
+    this.state.acceptWebSocket(server);
+    server.serializeAttachment({ authed: false, t: Date.now() });
+    if (!(await this.state.storage.getAlarm())) await this.state.storage.setAlarm(Date.now() + 1000);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+  async webSocketMessage(ws, msg) {
+    let j = {}; try { j = JSON.parse(msg); } catch (e) {}
+    const att = ws.deserializeAttachment() || {};
+    if (!att.authed) {
+      if (j.auth && j.auth === this.env.DASH_PASSWORD) {
+        ws.serializeAttachment({ authed: true });
+        try { ws.send(JSON.stringify({ type: "hello", ok: true })); } catch (e) {}
+      } else { try { ws.close(4001, "unauthorized"); } catch (e) {} }
+    }
+  }
+  async webSocketClose(ws) { /* alarm loop notices empty socket list and stops */ }
+  async webSocketError(ws) { try { ws.close(); } catch (e) {} }
+  async alarm() {
+    const socks = this.state.getWebSockets();
+    // drop connections that never authenticated within 10s
+    for (const w of socks) {
+      const a = w.deserializeAttachment() || {};
+      if (!a.authed && Date.now() - (a.t || 0) > 10000) { try { w.close(4001, "auth timeout"); } catch (e) {} }
+    }
+    const authed = socks.filter((w) => (w.deserializeAttachment() || {}).authed);
+    if (!socks.length) return; // nobody listening — let the loop die
+    if (authed.length) {
+      try {
+        const live = await this.teslaLive();
+        const payload = JSON.stringify({ type: "live", t: new Date().toISOString(), live });
+        for (const w of authed) { try { w.send(payload); } catch (e) {} }
+      } catch (e) { /* stale token beat — cron refreshes access.json within a minute */ }
+    }
+    await this.state.storage.setAlarm(Date.now() + 10000);
+  }
+  async teslaLive() {
+    const now = Date.now();
+    if (!this.access || (this.accessExp || 0) < now / 1000 + 60) {
+      const o = await this.env.PW.get("access.json");
+      if (!o) throw new Error("no access snapshot yet");
+      const j = JSON.parse(await o.text());
+      this.access = j.access_token; this.accessExp = j.access_exp || 0; this.siteId = j.siteId;
+    }
+    if (!this.access || !this.siteId) throw new Error("access snapshot incomplete");
+    const r = await fetch(`${TESLA_API}/api/1/energy_sites/${this.siteId}/live_status`,
+      { headers: { Authorization: `Bearer ${this.access}` } });
+    if (!r.ok) { this.access = null; throw new Error("live_status " + r.status); }
+    return (await r.json()).response;
+  }
+}
+
 /* ---------------- entrypoints ---------------- */
 const ALLOWED_ORIGIN = "https://powerwall.randlefamily.com";
 const CORS = {
@@ -789,6 +858,10 @@ export default {
           "x-updated": (obj.uploaded ? new Date(obj.uploaded).toISOString() : ""),
           "Access-Control-Expose-Headers": "x-updated" },
       });
+    }
+    if (url.pathname === "/live") {
+      const id = env.LIVE.idFromName("hub");
+      return env.LIVE.get(id).fetch(request);
     }
     if (url.pathname === "/daybins") {
       const obj = await env.PW.get("daybins.enc");
