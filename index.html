@@ -273,6 +273,22 @@ async function loadData(pass){
   const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
   return JSON.parse(new TextDecoder().decode(pt));
 }
+let DAYBINS=null,DAYBINSP=null;
+async function loadDayBins(){
+  // per-day 15-min bins live in a separate blob (updated ~every 30 min)
+  if(DAYBINS) return DAYBINS;
+  if(DAYBINSP) return DAYBINSP;
+  DAYBINSP=(async()=>{
+    const res=await fetch(`${WORKER}/daybins?_=${Date.now()}`,{cache:'no-store'});
+    if(!res.ok) throw new Error('no day bins yet');
+    const raw=Uint8Array.from(atob((await res.text()).trim()),c=>c.charCodeAt(0));
+    const key=await deriveKey(PASS,raw.slice(0,16));
+    const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
+    DAYBINS=(JSON.parse(new TextDecoder().decode(pt)).day_bins)||{};
+    return DAYBINS;
+  })().catch(e=>{DAYBINSP=null;throw e});
+  return DAYBINSP;
+}
 const el=id=>document.getElementById(id), val=id=>el(id).value;
 const kw=w=>w==null?'–':(Math.abs(w)>=950?(w/1000).toFixed(1)+' kW':Math.round(w)+' W');
 const kwh=x=>x==null?'–':(x/1000).toFixed(1)+' kWh';
@@ -543,9 +559,10 @@ function renderQuads(d){
     if(isToday){
       h=(d.history||[]).filter(p=>p.t&&p.t.slice(0,10)===today);
     }else{
-      // past day: rebuild 15-min samples from the worker's per-day bins
+      // past day: rebuild 15-min samples from the per-day bins (lazy-loaded)
       h=[];
-      const bins=(d.day_bins||{})[selDay]||[];
+      if(!DAYBINS) loadDayBins().then(()=>{LAST&&renderQuads(LAST)}).catch(()=>{});
+      const bins=(DAYBINS||{})[selDay]||[];
       for(let i=0;i<96;i++){
         const b=bins[i]; if(!b)continue;
         h.push({t:selDay+'T'+String(Math.floor(i/4)).padStart(2,'0')+':'+String((i%4)*15).padStart(2,'0'),
