@@ -109,6 +109,8 @@ async function loadState(env) {
   // one-time migration (2026-07-17d): refetch 12 months of Tesla daily energy — the
   // BST anchor bug meant whole months (incl. June) were missing from the charts
   if (!state.mig_en1) { state.energyDeepFill = 0; state.lastEnergy = 0; state.mig_en1 = 1; }
+  // one-time migration (2026-07-17f): refresh octopus promptly to pull Home Mini telemetry
+  if (!state.mig_tel1) { state.lastOcto = 0; state.mig_tel1 = 1; }
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -183,6 +185,39 @@ function rateAtEpoch(rates, tms) {
     if (from <= tms && tms < to) return r.value_inc_vat;
   }
   return null;
+}
+// Kraken GraphQL (Home Mini live telemetry — the REST consumption feed lags ~a day)
+async function krakenGQL(env, state, query, variables) {
+  const now = Date.now() / 1000;
+  const k = (state.kraken = state.kraken || {});
+  if (!k.token || now - (k.birth || 0) > 3000) {
+    const r = await fetch("https://api.octopus.energy/v1/graphql/", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "mutation($k:String!){obtainKrakenToken(input:{APIKey:$k}){token}}", variables: { k: env.OCTOPUS_API_KEY } }),
+    });
+    const j = await r.json().catch(() => ({}));
+    k.token = (((j || {}).data || {}).obtainKrakenToken || {}).token;
+    k.birth = now;
+    if (!k.token) throw new Error("kraken auth failed");
+  }
+  const r2 = await fetch("https://api.octopus.energy/v1/graphql/", {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: k.token },
+    body: JSON.stringify({ query, variables }),
+  });
+  const j2 = await r2.json();
+  if (j2.errors) throw new Error("kraken: " + JSON.stringify(j2.errors).slice(0, 120));
+  return j2.data;
+}
+async function krakenDeviceId(env, state) {
+  if (state.octoDevId) return state.octoDevId;
+  const d = await krakenGQL(env, state,
+    "query($a:String!){account(accountNumber:$a){electricityAgreements(active:true){meterPoint{meters{smartDevices{deviceId}}}}}}",
+    { a: env.OCTOPUS_ACCOUNT });
+  for (const ag of (((d || {}).account || {}).electricityAgreements) || [])
+    for (const m of ((ag.meterPoint || {}).meters) || [])
+      for (const sd of m.smartDevices || [])
+        if (sd.deviceId) { state.octoDevId = sd.deviceId; return sd.deviceId; }
+  throw new Error("no smart device (Home Mini) found");
 }
 async function fetchOctopus(env, state) {
   const auth = "Basic " + btoa(env.OCTOPUS_API_KEY + ":");
@@ -306,11 +341,40 @@ async function fetchOctopus(env, state) {
           d.impKwh += c.consumption;
           d.impCost += c.consumption * rate;
           if (dayMin != null && rate <= dayMin + 0.01) d.offKwh += c.consumption; else d.peakKwh += c.consumption;
+          d.cov = Math.max(d.cov || 0, Date.parse(c.interval_end || c.interval_start) || 0);
         } else {
           if (rate == null) rate = 12;
           d.expKwh += c.consumption;
           d.expEarn += c.consumption * rate;
         }
+      }
+      // today: the REST feed lags ~a day — fill from Home Mini live telemetry (import only;
+      // it prices with the same dated rates + smart-slot logic, and REST replaces it tomorrow)
+      if (kind === "import" && !chunkEnd) {
+        try {
+          const todayKey = localMinuteISO().slice(0, 10);
+          if (!daily[todayKey]) {
+            const devId = await krakenDeviceId(env, state);
+            const tel = await krakenGQL(env, state,
+              "query($d:String!,$s:DateTime!,$e:DateTime!){smartMeterTelemetry(deviceId:$d,grouping:HALF_HOURLY,start:$s,end:$e){readAt consumptionDelta}}",
+              { d: devId, s: new Date(Date.parse(londonDayStartISO(new Date()))).toISOString(), e: new Date().toISOString() });
+            for (const row of (tel || {}).smartMeterTelemetry || []) {
+              const kwh = (parseFloat(row.consumptionDelta) || 0) / 1000; // Wh → kWh
+              const ts = Date.parse(row.readAt);
+              if (!(kwh > 0) || !ts) continue;
+              const lm2 = localMinuteISO(new Date(ts));
+              if (lm2.slice(0, 10) !== todayKey) continue;
+              const dd = (daily[todayKey] = daily[todayKey] || { d: todayKey, impKwh: 0, impCost: 0, offKwh: 0, peakKwh: 0, expKwh: 0, expEarn: 0, telemetry: 1 });
+              let rate = rateAtEpoch(rates, ts);
+              const dayMin = minRateAt(ts, todayKey);
+              if ((ioSet.has(lm2.slice(0, 16)) || kwh >= 2.0) && dayMin != null) rate = dayMin;
+              if (rate == null) rate = dayMin ?? 5.9;
+              dd.impKwh += kwh; dd.impCost += kwh * rate;
+              if (dayMin != null && rate <= dayMin + 0.01) dd.offKwh += kwh; else dd.peakKwh += kwh;
+              dd.cov = Math.max(dd.cov || 0, ts + 1800e3);
+            }
+          }
+        } catch (e) { /* no Home Mini / telemetry hiccup — REST catches up tomorrow */ }
       }
       out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: rates.slice(-200) };
     }
