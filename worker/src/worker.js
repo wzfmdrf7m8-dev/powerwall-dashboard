@@ -302,7 +302,7 @@ async function fetchOctopus(env, state) {
           // charging sustains ≥4 kW for a half-hour — reprice those (≥2 kWh/HH).
           const bigDraw = (c.consumption || 0) >= 2.0;
           if ((ioSet.has(localKey) || bigDraw) && dayMin != null) rate = dayMin;
-          if (rate == null) rate = dayMin ?? 5.62;
+          if (rate == null) rate = dayMin ?? 5.9; // inc-VAT night rate fallback
           d.impKwh += c.consumption;
           d.impCost += c.consumption * rate;
           if (dayMin != null && rate <= dayMin + 0.01) d.offKwh += c.consumption; else d.peakKwh += c.consumption;
