@@ -7,6 +7,9 @@ workers_dev = false
 [triggers]
 crons = ["* * * * *"]
 
+[observability]
+enabled = true
+
 [[r2_buckets]]
 binding = "PW"
 bucket_name = "powerwall-data"
