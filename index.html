@@ -669,7 +669,7 @@ function renderQuads(d){
       prev=p;
     }
     el('q_home_cost').textContent=h.length?'≈ '+gbp(homeCost)+' inc. Powerwall & EV':'';
-    el('q_solar_val').textContent=h.length?'≈ '+gbp(solarVal)+' export value (solar + PW)':'';
+    el('q_solar_val').textContent=h.length?'≈ '+gbp(solarVal)+' generated @ export rate (not all exported)':'';
     const dayExp=td.timestamp?((td.grid_energy_exported_from_solar||0)+(td.grid_energy_exported_from_battery||0)):null;
     // Ohme circuit bypasses Tesla's CTs — add its draw for a meter-comparable import
     el('q_grid_exp').textContent=dayExp!=null?'↓ '+(((td.grid_energy_imported||0)/1000)+evKwh).toFixed(1)+' kWh imported'+(evKwh>0.05?' (incl. EV '+evKwh.toFixed(1)+')':'')+' · ↑ '+(dayExp/1000).toFixed(1)+' kWh exported':'';
@@ -731,7 +731,7 @@ function renderQuads(d){
     const sumBattExp=sum(r=>r.grid_energy_exported_from_battery)||0;
     const sumExp=sum(r=>(r.grid_energy_exported_from_solar||0)+(r.grid_energy_exported_from_battery||0));
     const sumImp=sum(r=>r.grid_energy_imported);
-    el('q_solar_val').textContent=sumSolar!=null?'≈ '+gbp((sumSolar+sumBattExp)/1000*expR)+' export value (solar + PW)':'';
+    el('q_solar_val').textContent=sumSolar!=null?'≈ '+gbp((sumSolar+sumBattExp)/1000*expR)+' generated @ export rate (not all exported)':'';
     el('q_grid_exp').textContent=sumExp!=null?'↓ '+((sumImp||0)/1000).toFixed(1)+' kWh imported · ↑ '+(sumExp/1000).toFixed(1)+' kWh exported (solar + PW)':'';
     // direct home cost from the minute-accurate daily ledger (no blending)
     const led=d.ledger||{};
