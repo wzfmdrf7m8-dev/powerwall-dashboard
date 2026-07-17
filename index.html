@@ -443,8 +443,9 @@ function mkQuad(canvasId,labels,series,type){
       interaction:{intersect:false,mode:'index'}}});
 }
 function billingStart(){
+  // Octopus statements run 16th → 15th inclusive
   const n=new Date(),y=n.getFullYear(),m=n.getMonth();
-  const s=n.getDate()>=15?new Date(Date.UTC(y,m,15)):new Date(Date.UTC(y,m-1,15));
+  const s=n.getDate()>=16?new Date(Date.UTC(y,m,16)):new Date(Date.UTC(y,m-1,16));
   return s.toISOString().slice(0,10);
 }
 function renderNet(d){
@@ -517,8 +518,8 @@ function populateRange(period){
   }else if(period==='month'){
     const bs=new Date(billingStart()+'T00:00:00Z');
     for(let i=0;i<12;i++){
-      const s=new Date(Date.UTC(bs.getUTCFullYear(),bs.getUTCMonth()-i,15));
-      const e2=new Date(Date.UTC(s.getUTCFullYear(),s.getUTCMonth()+1,15));
+      const s=new Date(Date.UTC(bs.getUTCFullYear(),bs.getUTCMonth()-i,16));
+      const e2=new Date(Date.UTC(s.getUTCFullYear(),s.getUTCMonth()+1,16));
       add(iso(s)+'|'+iso(e2),lbl(s)+' – '+lbl(new Date(e2-864e5)));
     }
   }else{
