@@ -818,6 +818,11 @@ async function pollCycle(env, state, opts = {}) {
       state.lastVailEnergy = now;
       try { await fetchVaillantEnergy(env, state, log); } catch (e) { log.push("vail energy: " + String(e).slice(0, 80)); }
     }
+    // Oura ring, hourly (data only changes after the ring syncs)
+    if (now - (state.lastOura || 0) > 3600 || opts.force) {
+      state.lastOura = now;
+      try { state.oura = await fetchOura(env); } catch (e) { log.push("oura: " + String(e).slice(0, 80)); }
+    }
     await refreshHome(env, state, log);
   }
   if (env.OCTOPUS_API_KEY && (!state.octopus || !state.octoDeepFill || now - (state.lastOcto || 0) > 1800 || opts.force)) {
@@ -1311,11 +1316,49 @@ async function fetchEero(env, state) {
   };
 }
 
+/* ---------------- Oura ring ---------------- */
+async function fetchOura(env) {
+  if (!env.OURA_TOKEN) return { error: "Oura token not set — add the OURA_TOKEN secret" };
+  const H = { Authorization: `Bearer ${env.OURA_TOKEN}` };
+  const base = "https://api.ouraring.com/v2/usercollection";
+  const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const until = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+  const get = async (p, dated = true) => {
+    const u = dated ? `${base}/${p}?start_date=${since}&end_date=${until}` : `${base}/${p}`;
+    const r = await fetch(u, { headers: H });
+    if (!r.ok) throw new Error(`oura ${p} ${r.status}`);
+    return r.json();
+  };
+  const out = { t: localOffsetISO().slice(0, 19) };
+  try { const i = await get("personal_info", false); out.info = { age: i.age, weight: i.weight, height: i.height, sex: i.biological_sex }; }
+  catch (e) { out.error = String(e).slice(0, 120); return out; }
+  const pull = async (name, key, map) => { try { out[key] = (((await get(name)).data) || []).map(map); } catch (e) {} };
+  await pull("daily_sleep", "sleep", (d) => ({ day: d.day, score: d.score, c: d.contributors }));
+  await pull("daily_readiness", "readiness", (d) => ({ day: d.day, score: d.score, temp: d.temperature_deviation, c: d.contributors }));
+  await pull("daily_activity", "activity", (d) => ({ day: d.day, score: d.score, steps: d.steps, cal: d.active_calories, totalCal: d.total_calories, high: d.high_activity_time, med: d.medium_activity_time, low: d.low_activity_time, sed: d.sedentary_time }));
+  await pull("daily_stress", "stress", (d) => ({ day: d.day, high: d.stress_high, recov: d.recovery_high, summary: d.day_summary }));
+  await pull("daily_spo2", "spo2", (d) => ({ day: d.day, avg: (d.spo2_percentage || {}).average, bdi: d.breathing_disturbance_index }));
+  await pull("daily_resilience", "resilience", (d) => ({ day: d.day, level: d.level, c: d.contributors }));
+  await pull("daily_cardiovascular_age", "cardio", (d) => ({ day: d.day, age: d.vascular_age }));
+  await pull("vO2_max", "vo2", (d) => ({ day: d.day, vo2: d.vo2_max }));
+  try {
+    const s = await get("sleep");
+    out.nights = (((s || {}).data) || []).filter((x) => x.type === "long_sleep" || (x.total_sleep_duration || 0) > 3 * 3600).slice(-7).map((d) => ({
+      day: d.day, start: d.bedtime_start, end: d.bedtime_end, dur: d.total_sleep_duration, tib: d.time_in_bed,
+      eff: d.efficiency, deep: d.deep_sleep_duration, rem: d.rem_sleep_duration, light: d.light_sleep_duration,
+      awake: d.awake_time, hr: d.average_heart_rate, lhr: d.lowest_heart_rate, hrv: d.average_hrv, br: d.average_breath,
+    }));
+  } catch (e) {}
+  try { const r = await get("ring_configuration", false); const rc = (((r || {}).data) || [])[0] || {}; out.ring = { color: rc.color, design: rc.design, size: rc.size, hw: rc.hardware_type, fw: rc.firmware_version }; } catch (e) {}
+  return out;
+}
+
 async function refreshHome(env, state, log) {
   const home = (state.home = state.home || {});
   try { home.tado = await fetchTado(env, state); } catch (e) { home.tado = { ...(home.tado || {}), error: String(e).slice(0, 140) }; }
   try { home.vaillant = await fetchVaillant(env, state); } catch (e) { home.vaillant = { ...(home.vaillant || {}), error: String(e).slice(0, 140) }; }
   try { home.eero = await fetchEero(env, state); } catch (e) { home.eero = { ...(home.eero || {}), error: String(e).slice(0, 140) }; }
+  home.oura = state.oura || { error: "Oura not connected yet" };
   try {
     await env.PW.put("home.enc", await encryptBundle(state, { generated_at: localOffsetISO().slice(0, 19), ...home }));
   } catch (e) { log.push("home blob error: " + String(e).slice(0, 80)); }
