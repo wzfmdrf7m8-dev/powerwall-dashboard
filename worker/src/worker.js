@@ -856,6 +856,70 @@ async function runCommand(env, state, command, value) {
     await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/grid_import_export`,
       { disallow_charge_from_grid_with_solar_installed: value !== "on" });
     log.push(`grid charging -> ${value} (manual)`);
+  } else if (command === "tado_presence") {
+    const tok = await tadoToken(env, state);
+    const r = await fetch(`https://my.tado.com/api/v2/homes/${state.tadoHome}/presenceLock`, {
+      method: "PUT", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ homePresence: value }),
+    });
+    if (!r.ok && r.status !== 204) throw new Error(`tado presence ${r.status}`);
+    log.push(`tado home mode -> ${value}`);
+  } else if (command === "tado_set") {
+    const [zid, temp] = String(value).split("|");
+    const tok = await tadoToken(env, state);
+    const r = await fetch(`https://my.tado.com/api/v2/homes/${state.tadoHome}/zones/${zid}/overlay`, {
+      method: "PUT", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        setting: { type: "HEATING", power: "ON", temperature: { celsius: parseFloat(temp) } },
+        termination: { type: "TADO_MODE" },
+      }),
+    });
+    if (!r.ok) throw new Error(`tado set ${r.status}: ${(await r.text()).slice(0, 100)}`);
+    log.push(`tado zone ${zid} -> ${temp}° (until schedule change)`);
+  } else if (command === "tado_resume") {
+    const tok = await tadoToken(env, state);
+    const r = await fetch(`https://my.tado.com/api/v2/homes/${state.tadoHome}/zones/${value}/overlay`, {
+      method: "DELETE", headers: { Authorization: `Bearer ${tok}` },
+    });
+    if (!r.ok && r.status !== 204) throw new Error(`tado resume ${r.status}`);
+    log.push(`tado zone ${value} -> back to schedule`);
+  } else if (command.startsWith("vaillant_")) {
+    const tok = await vaillantToken(env, state);
+    const base = (state.vaillantCtrl === "vrc700" ? VAILLANT_API.replace("end-user-app-api/v1", "vrc700/v1") : VAILLANT_API)
+      + `/systems/${state.vaillantSys}/${state.vaillantCtrl || "tli"}`;
+    const vh = { Authorization: `Bearer ${tok}`, "Content-Type": "application/json", "x-app-identifier": "VAILLANT", "Accept-Language": "en-GB", "x-client-locale": "en-GB", "x-idm-identifier": "KEYCLOAK", "ocp-apim-subscription-key": "1e0a2f3511fb4c5bbb1c7f9fedd20b1c", "User-Agent": "okhttp/4.9.2" };
+    const vreq = async (method, path, body) => {
+      const r = await fetch(base + path, { method, headers: vh, body: body ? JSON.stringify(body) : undefined });
+      if (!r.ok && r.status !== 204) throw new Error(`vaillant ${path} ${r.status}: ${(await r.text()).slice(0, 100)}`);
+    };
+    if (command === "vaillant_dhw_boost") {
+      if (value === "on") { await vreq("POST", "/domestic-hot-water/0/boost", {}); log.push("hot water boost started"); }
+      else { await vreq("DELETE", "/domestic-hot-water/0/boost"); log.push("hot water boost cancelled"); }
+    } else if (command === "vaillant_dhw_temp") {
+      await vreq("PATCH", "/domestic-hot-water/0/temperature", { setpoint: Math.round(parseFloat(value)) });
+      log.push(`hot water target -> ${Math.round(parseFloat(value))}°`);
+    } else if (command === "vaillant_veto") {
+      const [idx, temp] = String(value).split("|");
+      await vreq("POST", `/zones/${idx}/quick-veto`, { desiredRoomTemperatureSetpoint: parseFloat(temp), duration: 4 });
+      log.push(`zone ${idx} veto -> ${temp}° for 4h`);
+    } else if (command === "vaillant_veto_cancel") {
+      await vreq("DELETE", `/zones/${value}/quick-veto`);
+      log.push(`zone ${value} veto cancelled`);
+    }
+  } else if (command === "eero_reboot" || command === "eero_guest" || command === "eero_speedtest") {
+    const ecall = async (method, p, body) => {
+      const r = await fetch(`https://api-user.e2ro.com/2.2/${p}`, {
+        method, headers: { Cookie: `s=${state.eeroTok}`, "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const j = await r.json().catch(() => ({}));
+      const code = ((j || {}).meta || {}).code;
+      if (code !== 200 && code !== 201 && code !== 202) throw new Error(`eero ${p} ${code}: ${JSON.stringify((j || {}).meta).slice(0, 80)}`);
+      return j.data;
+    };
+    if (command === "eero_reboot") { await ecall("POST", `eeros/${value}/reboot`); log.push(`rebooting eero ${value}`); }
+    else if (command === "eero_guest") { await ecall("PUT", `networks/${state.eeroNet}/guestnetwork`, { enabled: value === "on" }); log.push(`guest network -> ${value}`); }
+    else { await ecall("POST", `networks/${state.eeroNet}/speedtest`, {}); log.push("speed test started — results in a few minutes"); }
   } else if (command === "tado_auth") {
     const r = await fetch("https://login.tado.com/oauth2/device_authorize?" + new URLSearchParams({
       client_id: TADO_CLIENT, scope: "offline_access",
@@ -970,6 +1034,7 @@ async function fetchTado(env, state) {
     const s = zs[z.id] || {};
     const sd = s.sensorDataPoints || {};
     return {
+      id: z.id,
       name: z.name,
       temp: ((sd.insideTemperature || {}).celsius),
       humidity: ((sd.humidity || {}).percentage),
@@ -1062,6 +1127,7 @@ async function fetchVaillant(env, state) {
   const st = (sys || {}).state || {}, props = (sys || {}).properties || {}, cfg = (sys || {}).configuration || {};
   const sState = st.system || {}, sProps = props.system || {};
   const zones = (st.zones || []).map((z, i) => ({
+    index: z.index ?? i,
     name: ((((cfg.zones || [])[i]) || {}).general || {}).name || `Zone ${i + 1}`,
     temp: z.currentRoomTemperature, target: z.desiredRoomTemperatureSetpoint,
     humidity: z.currentRoomHumidity,
@@ -1114,7 +1180,7 @@ async function fetchEero(env, state) {
     speed: (net || {}).speed || null,
     guest: (((net || {}).guest_network) || {}).enabled || false,
     deviceCount: conn.length,
-    nodes: (nodes || []).map((n) => ({ location: n.location, status: n.status, model: n.model })),
+    nodes: (nodes || []).map((n) => ({ id: ((n.url || "").match(/\/(\d+)$/) || [])[1], location: n.location, status: n.status, model: n.model })),
     devices: conn.slice(0, 60).map((d) => ({
       name: d.nickname || d.hostname || d.manufacturer || "unknown",
       ip: d.ip, wireless: d.wireless, band: (d.connectivity || {}).frequency || null,
