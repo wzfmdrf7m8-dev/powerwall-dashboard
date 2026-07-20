@@ -68,6 +68,11 @@
   <h3 style="margin-bottom:8px">STEPS — LAST 30 DAYS</h3>
   <canvas id="stepChart" height="110"></canvas>
 </div>
+<div class="card" style="margin-bottom:18px" id="tempCard">
+  <h3 style="margin-bottom:2px">SLEEP vs BEDROOM TEMP</h3>
+  <div class="m" id="tempVerdict" style="font-size:13px;color:var(--dim);margin-bottom:8px">collecting…</div>
+  <canvas id="tempChart" height="130"></canvas>
+</div>
 <div class="card" style="margin-bottom:18px" id="nightsCard" hidden>
   <h3 style="margin-bottom:8px">RECENT NIGHTS</h3>
   <div style="overflow-x:auto"><table id="nightsTable"></table></div>
@@ -146,6 +151,26 @@ function render(d){
   if(CH2)CH2.destroy();
   CH2=new Chart(el('stepChart'),{type:'bar',data:{labels:days.map(x=>x.slice(5)),datasets:[{label:'steps',data:pick(o.activity,'steps'),backgroundColor:'rgba(0,122,255,.8)',borderRadius:3}]},
     options:{animation:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4}},x:{ticks:{maxTicksLimit:10,color:'#6e6e73'},grid:{display:false}}}}});
+  // sleep vs bedroom temperature correlation
+  const sl=(d.sleepLog||[]).filter(x=>x.temp!=null&&x.score!=null);
+  if(!sl.length){
+    el('tempVerdict').textContent='Logging started — your bedroom temperature is sampled overnight (via tado) and paired with each night\u2019s sleep score. First points appear after tonight.';
+  }else{
+    // 0.5-degree buckets, need >=3 nights to call a winner
+    const buckets={};
+    for(const x of sl){const k=(Math.round(x.temp*2)/2).toFixed(1);(buckets[k]=buckets[k]||[]).push(x.score)}
+    let best=null;
+    for(const k in buckets){if(buckets[k].length>=3){const avg=buckets[k].reduce((a,b)=>a+b,0)/buckets[k].length;
+      if(!best||avg>best.avg)best={t:k,avg,n:buckets[k].length}}}
+    el('tempVerdict').textContent=sl.length+' nights logged ('+(sl[0].room||'bedroom')+')'+
+      (best?(' \u00b7 best so far: '+best.t+'\u00b0 \u2192 avg score '+best.avg.toFixed(0)+' over '+best.n+' nights'):' \u00b7 need ~3 nights per temperature to call a winner');
+    if(window.CH3)CH3.destroy();
+    window.CH3=new Chart(el('tempChart'),{type:'scatter',data:{datasets:[{label:'night',
+      data:sl.map(x=>({x:x.temp,y:x.score,d:x.d})),backgroundColor:'rgba(175,82,222,.8)',pointRadius:5,pointHoverRadius:7}]},
+      options:{animation:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw.d+': '+c.raw.y+' @ '+c.raw.x+'\u00b0'}}},
+        scales:{x:{title:{display:true,text:'bedroom \u00b0C overnight',color:'#6e6e73',font:{size:11}},grid:{color:'rgba(0,0,0,.06)'}},
+          y:{title:{display:true,text:'sleep score',color:'#6e6e73',font:{size:11}},min:40,max:100,grid:{color:'rgba(0,0,0,.06)'}}}}});
+  }
   // recent nights table
   const nights=(o.nights||[]).slice().reverse();
   if(nights.length){
