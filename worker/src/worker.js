@@ -777,6 +777,13 @@ async function pollCycle(env, state, opts = {}) {
       }
     } catch (e) {}
   }
+  // tado device-code approval pending: poll every tick until Jon confirms
+  if (state.tadoDevice) { try { await tadoPollToken(env, state, log); } catch (e) {} }
+  // home integrations (tado / vaillant / eero) every 5 min
+  if (now - (state.lastHome || 0) > 300 || opts.force) {
+    state.lastHome = now;
+    await refreshHome(env, state, log);
+  }
   if (env.OCTOPUS_API_KEY && (!state.octopus || !state.octoDeepFill || now - (state.lastOcto || 0) > 1800 || opts.force)) {
     try { state.octopus = await fetchOctopus(env, state); state.lastOcto = now; }
     catch (e) {
@@ -849,6 +856,33 @@ async function runCommand(env, state, command, value) {
     await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/grid_import_export`,
       { disallow_charge_from_grid_with_solar_installed: value !== "on" });
     log.push(`grid charging -> ${value} (manual)`);
+  } else if (command === "tado_auth") {
+    const r = await fetch("https://login.tado.com/oauth2/device_authorize?" + new URLSearchParams({
+      client_id: TADO_CLIENT, scope: "offline_access",
+    }), { method: "POST" });
+    const j = await r.json();
+    if (!j.device_code) throw new Error("tado device_authorize failed");
+    state.tadoDevice = { device_code: j.device_code, expires: Date.now() / 1000 + (j.expires_in || 300) };
+    log.push(`tado: approve at ${j.verification_uri_complete} (code ${j.user_code})`);
+  } else if (command === "eero_login") {
+    const r = await fetch("https://api-user.e2ro.com/2.2/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: value }),
+    });
+    const j = await r.json();
+    if ((((j || {}).meta || {}).code) !== 200) throw new Error("eero login: " + JSON.stringify(j.meta).slice(0, 100));
+    state.eeroPending = j.data.user_token;
+    log.push("eero: verification code sent — enter it with Verify");
+  } else if (command === "eero_verify") {
+    if (!state.eeroPending) throw new Error("run eero login first");
+    const r = await fetch("https://api-user.e2ro.com/2.2/login/verify", {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: `s=${state.eeroPending}` },
+      body: JSON.stringify({ code: String(value).trim() }),
+    });
+    const j = await r.json();
+    if ((((j || {}).meta || {}).code) !== 200) throw new Error("eero verify: " + JSON.stringify(j.meta).slice(0, 100));
+    state.eeroTok = state.eeroPending; delete state.eeroPending; delete state.eeroNet;
+    log.push("eero connected ✓");
   } else if (command === "export_rule") {
     // battery_ok = export everything (solar + Powerwall), pv_only = solar only, never = no export
     const rule = { everything: "battery_ok", solar: "pv_only", never: "never" }[value] || value;
@@ -873,6 +907,229 @@ async function runCommand(env, state, command, value) {
   state.lastLog = log;
   await pollCycle(env, state, { force: true });
   return log;
+}
+
+/* ---------------- home integrations: tado / vaillant / eero ---------------- */
+const TADO_CLIENT = "1bb50063-6b0c-4d11-bd99-387f4a91cc46";
+async function tadoPollToken(env, state, log) {
+  // device-code flow pending: poll until Jon approves in the browser
+  const dv = state.tadoDevice;
+  if (!dv) return;
+  if (Date.now() / 1000 > dv.expires) { delete state.tadoDevice; log.push("tado auth expired — run Connect tado again"); return; }
+  const r = await fetch("https://login.tado.com/oauth2/token?" + new URLSearchParams({
+    client_id: TADO_CLIENT, device_code: dv.device_code,
+    grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+  }), { method: "POST" });
+  const j = await r.json().catch(() => ({}));
+  if (j.access_token) {
+    state.tado = { access: j.access_token, exp: Date.now() / 1000 + (j.expires_in || 599) - 60, refresh: j.refresh_token };
+    try { await env.PW.put("tado_rt.txt", j.refresh_token); } catch (e) {}
+    delete state.tadoDevice;
+    log.push("tado connected ✓");
+  }
+}
+async function tadoToken(env, state) {
+  const t = (state.tado = state.tado || {});
+  if (t.access && Date.now() / 1000 < (t.exp || 0)) return t.access;
+  let mirror = null;
+  try { const o = await env.PW.get("tado_rt.txt"); if (o) mirror = (await o.text()).trim(); } catch (e) {}
+  const candidates = [...new Set([t.refresh, mirror].filter(Boolean))];
+  let lastErr = "tado not connected";
+  for (const rt of candidates) {
+    const r = await fetch("https://login.tado.com/oauth2/token?" + new URLSearchParams({
+      client_id: TADO_CLIENT, grant_type: "refresh_token", refresh_token: rt,
+    }), { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (j.access_token) {
+      t.access = j.access_token; t.exp = Date.now() / 1000 + (j.expires_in || 599) - 60; t.refresh = j.refresh_token;
+      try { await env.PW.put("tado_rt.txt", j.refresh_token); } catch (e) {}
+      await saveState(env, state);
+      return t.access;
+    }
+    lastErr = JSON.stringify(j).slice(0, 120);
+  }
+  throw new Error("tado token: " + lastErr);
+}
+async function fetchTado(env, state) {
+  const tok = await tadoToken(env, state);
+  const get = async (p) => {
+    const r = await fetch("https://my.tado.com/api/v2" + p, { headers: { Authorization: `Bearer ${tok}` } });
+    if (!r.ok) throw new Error(`tado ${p} ${r.status}`);
+    return r.json();
+  };
+  if (!state.tadoHome) {
+    const me = await get("/me");
+    state.tadoHome = (((me || {}).homes || [])[0] || {}).id;
+  }
+  const h = state.tadoHome;
+  const [zones, zoneStates, weather, homeState] = await Promise.all([
+    get(`/homes/${h}/zones`), get(`/homes/${h}/zoneStates`), get(`/homes/${h}/weather`), get(`/homes/${h}/state`),
+  ]);
+  const zs = (zoneStates || {}).zoneStates || {};
+  const rooms = (zones || []).filter((z) => z.type === "HEATING").map((z) => {
+    const s = zs[z.id] || {};
+    const sd = s.sensorDataPoints || {};
+    return {
+      name: z.name,
+      temp: ((sd.insideTemperature || {}).celsius),
+      humidity: ((sd.humidity || {}).percentage),
+      target: (((s.setting || {}).temperature) || {}).celsius ?? null,
+      power: ((((s.activityDataPoints || {}).heatingPower) || {}).percentage) || 0,
+      mode: (s.setting || {}).power,
+      openWindow: !!s.openWindow,
+    };
+  });
+  return {
+    t: localOffsetISO().slice(0, 19),
+    rooms,
+    presence: (homeState || {}).presence,
+    outside: (((weather || {}).outsideTemperature) || {}).celsius,
+    solar: (((weather || {}).solarIntensity) || {}).percentage,
+    weather: (((weather || {}).weatherState) || {}).value,
+  };
+}
+
+const VAILLANT_REALM = "vaillant-unitedkingdom-b2c";
+const VAILLANT_AUTH = `https://identity.vaillant-group.com/auth/realms/${VAILLANT_REALM}`;
+const VAILLANT_API = "https://api.vaillant-group.com/service-connected-control/end-user-app-api/v1";
+function b64url(buf) { return b64e(buf).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+async function vaillantLogin(env, state) {
+  // PKCE + Keycloak login form (no OIDC UI available for machine use)
+  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+  const verifier = b64url(verifierBytes);
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", te.encode(verifier)));
+  const q = new URLSearchParams({
+    response_type: "code", client_id: "myvaillant", code: "code_challenge",
+    redirect_uri: "enduservaillant.page.link://login",
+    code_challenge_method: "S256", code_challenge: challenge,
+  });
+  const r1 = await fetch(`${VAILLANT_AUTH}/protocol/openid-connect/auth?${q}`, { redirect: "manual" });
+  const cookies = (r1.headers.getSetCookie ? r1.headers.getSetCookie() : []).map((c) => c.split(";")[0]).join("; ");
+  const html = await r1.text();
+  const m = html.match(new RegExp(`${VAILLANT_AUTH}/login-actions/authenticate\\?[^"]*`.replace(/[/.]/g, (c) => "\\" + c)));
+  if (!m) throw new Error("vaillant: login form not found");
+  const loginUrl = m[0].replace(/&amp;/g, "&");
+  const r2 = await fetch(loginUrl, {
+    method: "POST", redirect: "manual",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: cookies },
+    body: new URLSearchParams({ username: env.MYVAILLANT_EMAIL, password: env.MYVAILLANT_PASSWORD, credentialId: "" }),
+  });
+  const loc = r2.headers.get("Location") || "";
+  const code = new URLSearchParams(loc.split("?")[1] || "").get("code");
+  if (!code) throw new Error("vaillant: login failed (check credentials)");
+  const r3 = await fetch(`${VAILLANT_AUTH}/protocol/openid-connect/token`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code", client_id: "myvaillant", code,
+      code_verifier: verifier, redirect_uri: "enduservaillant.page.link://login",
+    }),
+  });
+  const j = await r3.json();
+  if (!j.access_token) throw new Error("vaillant token: " + JSON.stringify(j).slice(0, 120));
+  return j;
+}
+async function vaillantToken(env, state) {
+  const v = (state.vaillant = state.vaillant || {});
+  const now = Date.now() / 1000;
+  if (v.access && now < (v.exp || 0)) return v.access;
+  if (v.refresh) {
+    const r = await fetch(`${VAILLANT_AUTH}/protocol/openid-connect/token`, {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", client_id: "myvaillant", refresh_token: v.refresh }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.access_token) { v.access = j.access_token; v.refresh = j.refresh_token || v.refresh; v.exp = now + (j.expires_in || 300) - 30; return v.access; }
+  }
+  const j = await vaillantLogin(env, state);
+  v.access = j.access_token; v.refresh = j.refresh_token; v.exp = now + (j.expires_in || 300) - 30;
+  return v.access;
+}
+async function fetchVaillant(env, state) {
+  if (!env.MYVAILLANT_EMAIL) return { error: "myVAILLANT credentials not set" };
+  const tok = await vaillantToken(env, state);
+  const get = async (u) => {
+    const r = await fetch(u, { headers: { Authorization: `Bearer ${tok}`, "x-app-identifier": "VAILLANT", "Accept-Language": "en-GB", "Accept": "application/json, text/plain, */*", "x-client-locale": "en-GB", "x-idm-identifier": "KEYCLOAK", "ocp-apim-subscription-key": "1e0a2f3511fb4c5bbb1c7f9fedd20b1c", "User-Agent": "okhttp/4.9.2" } });
+    if (!r.ok) throw new Error(`vaillant ${r.status}: ${(await r.text()).slice(0, 100)}`);
+    return r.json();
+  };
+  if (!state.vaillantSys) {
+    const homes = await get(`${VAILLANT_API}/homes`);
+    state.vaillantSys = ((homes || [])[0] || {}).systemId;
+    state.vaillantCtrl = (((homes || [])[0] || {}).productMetadata || {}).controlIdentifier || "tli";
+  }
+  const base = state.vaillantCtrl === "vrc700" ? VAILLANT_API.replace("end-user-app-api/v1", "vrc700/v1") : VAILLANT_API;
+  const sys = await get(`${base}/systems/${state.vaillantSys}/${state.vaillantCtrl}`);
+  const st = (sys || {}).state || {}, props = (sys || {}).properties || {}, cfg = (sys || {}).configuration || {};
+  const sState = st.system || {}, sProps = props.system || {};
+  const zones = (st.zones || []).map((z, i) => ({
+    name: ((((cfg.zones || [])[i]) || {}).general || {}).name || `Zone ${i + 1}`,
+    temp: z.currentRoomTemperature, target: z.desiredRoomTemperatureSetpoint,
+    humidity: z.currentRoomHumidity,
+  }));
+  const dhw = ((st.domesticHotWater || [])[0]) || {};
+  const dhwCfg = ((cfg.domesticHotWater || [])[0]) || {};
+  const circuit = ((st.circuits || [])[0]) || {};
+  return {
+    t: localOffsetISO().slice(0, 19),
+    outdoor: sState.outdoorTemperature,
+    pressure: sState.systemWaterPressure,
+    flowTemp: sState.systemFlowTemperature ?? circuit.currentCircuitFlowTemperature,
+    dhwTemp: dhw.currentDhwTemperature,
+    dhwTarget: dhwCfg.tappingSetpoint,
+    zones,
+  };
+}
+
+async function fetchEero(env, state) {
+  if (!state.eeroTok) return { error: "eero not connected" };
+  const call = async (p, opts) => {
+    const r = await fetch(`https://api-user.e2ro.com/2.2/${p}`, {
+      ...opts, headers: { ...(opts || {}).headers, Cookie: `s=${state.eeroTok}`, "Content-Type": "application/json" },
+    });
+    const j = await r.json().catch(() => ({}));
+    const code = ((j || {}).meta || {}).code;
+    if (code === 401) {
+      // rotate session token
+      const rr = await fetch("https://api-user.e2ro.com/2.2/login/refresh", { method: "POST", headers: { Cookie: `s=${state.eeroTok}` } });
+      const rj = await rr.json().catch(() => ({}));
+      if ((((rj || {}).meta || {}).code) === 200) { state.eeroTok = rj.data.user_token; return call(p, opts); }
+      throw new Error("eero session expired — reconnect");
+    }
+    if (code !== 200 && code !== 201) throw new Error(`eero ${p} ${code}`);
+    return j.data;
+  };
+  if (!state.eeroNet) {
+    const acct = await call("account");
+    const url = ((((acct || {}).networks || {}).data || [])[0] || {}).url || "";
+    state.eeroNet = (url.match(/\/(\d+)$/) || [])[1];
+  }
+  const [net, devices, nodes] = await Promise.all([
+    call(`networks/${state.eeroNet}`), call(`networks/${state.eeroNet}/devices`), call(`networks/${state.eeroNet}/eeros`),
+  ]);
+  const conn = (devices || []).filter((d) => d.connected);
+  return {
+    t: localOffsetISO().slice(0, 19),
+    status: (net || {}).status,
+    name: (net || {}).name,
+    speed: (net || {}).speed || null,
+    guest: (((net || {}).guest_network) || {}).enabled || false,
+    deviceCount: conn.length,
+    nodes: (nodes || []).map((n) => ({ location: n.location, status: n.status, model: n.model })),
+    devices: conn.slice(0, 60).map((d) => ({
+      name: d.nickname || d.hostname || d.manufacturer || "unknown",
+      ip: d.ip, wireless: d.wireless, band: (d.connectivity || {}).frequency || null,
+    })),
+  };
+}
+
+async function refreshHome(env, state, log) {
+  const home = (state.home = state.home || {});
+  try { home.tado = await fetchTado(env, state); } catch (e) { home.tado = { ...(home.tado || {}), error: String(e).slice(0, 140) }; }
+  try { home.vaillant = await fetchVaillant(env, state); } catch (e) { home.vaillant = { ...(home.vaillant || {}), error: String(e).slice(0, 140) }; }
+  try { home.eero = await fetchEero(env, state); } catch (e) { home.eero = { ...(home.eero || {}), error: String(e).slice(0, 140) }; }
+  try {
+    await env.PW.put("home.enc", await encryptBundle(state, { generated_at: localOffsetISO().slice(0, 19), ...home }));
+  } catch (e) { log.push("home blob error: " + String(e).slice(0, 80)); }
 }
 
 /* ---------------- live streaming (Durable Object) ---------------- */
@@ -975,8 +1232,8 @@ export default {
       const id = env.LIVE.idFromName("hub");
       return env.LIVE.get(id).fetch(request);
     }
-    if (url.pathname === "/daybins") {
-      const obj = await env.PW.get("daybins.enc");
+    if (url.pathname === "/daybins" || url.pathname === "/home") {
+      const obj = await env.PW.get(url.pathname === "/home" ? "home.enc" : "daybins.enc");
       if (!obj) return new Response("no data yet", { status: 404, headers: CORS });
       return new Response(await obj.text(), {
         headers: { ...CORS, "Content-Type": "text/plain", "Cache-Control": "no-store" },
