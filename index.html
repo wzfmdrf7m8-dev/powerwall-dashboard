@@ -131,7 +131,7 @@
   <div style="display:flex;justify-content:center;gap:18%;max-width:760px;margin:4px auto 2px;text-align:center">
     <div><div id="fPw" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">POWERWALL</div></div>
     <div><div id="fHp" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">HEAT PUMP</div></div>
-    <div><div id="fGrid" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">GRID</div></div>
+    <div><div id="fGrid" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">GRID</div><div id="fGridDay" style="font-size:11px;color:#9a9aa2;margin-top:1px"></div></div>
   </div>
 </div>
 
@@ -475,6 +475,25 @@ function renderFlow(L){
     if(F3.led)F3.led.material.emissiveIntensity=Math.abs(L.battery_power||0)>50?1.6:0.5;
     if(F3.panel)F3.panel.material.emissiveIntensity=(L.solar_power||0)>50?0.85:0.22;
   }
+  // today's grid totals: imported (incl. EV circuit) / exported / net
+  try{
+    const eds=(LAST&&LAST.energy_daily)||[];
+    const td=eds.length?eds[eds.length-1]:null;
+    const today=((LAST&&LAST.generated_at)||'').slice(0,10);
+    if(td&&(td.timestamp||'').slice(0,10)===today){
+      let evK=0,prev=null;
+      for(const p of (LAST.history||[])){
+        if((p.t||'').slice(0,10)!==today){prev=p;continue}
+        let dtH=1/60;
+        if(prev&&prev.t){const dt=(new Date(p.t)-new Date(prev.t))/3600000;if(dt>0&&dt<=0.5)dtH=dt}
+        evK+=Math.max(p.ev||0,0)*dtH/1000;prev=p;
+      }
+      const impK=(td.grid_energy_imported||0)/1000+evK;
+      const expK=((td.grid_energy_exported_from_solar||0)+(td.grid_energy_exported_from_battery||0))/1000;
+      const net=impK-expK;
+      el('fGridDay').textContent='↓'+impK.toFixed(1)+' ↑'+expK.toFixed(1)+' · net '+(net>=0?'+':'\u2212')+Math.abs(net).toFixed(1)+' kWh';
+    }
+  }catch(e){}
   let st='Idle';
   if(ev>250)st='Charging';
   else if((L.grid_power||0)<-50)st='Exporting';
