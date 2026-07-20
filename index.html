@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-title" content="Powerwall">
 <meta name="theme-color" content="#f5f5f7">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
   :root{--bg:#f5f5f7;--card:#ffffff;--edge:rgba(0,0,0,.05);--txt:#1d1d1f;--dim:#6e6e73;
     --mint:#34c759;--sun:#ff9500;--cyan:#007aff;--pink:#ff3b30;--violet:#af52de}
@@ -119,78 +120,18 @@
 <div class="card" id="flowCard" style="background:#141419;border-color:#26262b;margin-bottom:16px">
   <h2 style="color:#7a7a82">Live energy flow</h2>
   <div id="fStatus" style="color:#34c759;font-weight:700;font-size:15px;margin:-2px 0 4px">–</div>
-  <svg id="flow" viewBox="0 0 720 540">
-    <defs>
-      <radialGradient id="sceneGlow" cx="0.55" cy="0.55" r="0.7">
-        <stop offset="0%" stop-color="rgba(88,116,255,.10)"/><stop offset="60%" stop-color="rgba(88,116,255,.03)"/><stop offset="100%" stop-color="rgba(0,0,0,0)"/>
-      </radialGradient>
-      <linearGradient id="wallG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#33333c"/><stop offset="100%" stop-color="#232329"/></linearGradient>
-      <linearGradient id="roofG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3d3d47"/><stop offset="100%" stop-color="#2d2d35"/></linearGradient>
-      <linearGradient id="panelG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#14141c"/><stop offset="50%" stop-color="#0c0c12"/><stop offset="100%" stop-color="#171722"/></linearGradient>
-      <linearGradient id="carG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3f7dff"/><stop offset="100%" stop-color="#2456c9"/></linearGradient>
-      <linearGradient id="pwG" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#fafafc"/><stop offset="100%" stop-color="#d9d9e0"/></linearGradient>
-      <linearGradient id="skyline" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(255,255,255,.04)"/><stop offset="100%" stop-color="rgba(255,255,255,0)"/></linearGradient>
-    </defs>
-    <rect x="0" y="0" width="720" height="428" fill="url(#sceneGlow)"/>
-    <rect x="0" y="0" width="720" height="120" fill="url(#skyline)"/>
-    <ellipse cx="400" cy="432" rx="330" ry="10" fill="rgba(0,0,0,.45)"/>
-    <rect x="0" y="428" width="720" height="1.5" fill="#2c2c33"/>
-    <path id="w_grid" class="wire" style="stroke:#2e2e35" d="M448 350 Q560 385 705 428"/>
-    <polygon points="60,302 150,238 240,302" fill="url(#roofG)"/>
-    <polygon points="60,302 150,238 240,302" fill="none" stroke="#45454f" stroke-width="1.5"/>
-    <rect x="60" y="302" width="180" height="126" fill="url(#wallG)"/>
-    <rect x="88" y="330" width="124" height="98" fill="#0b0b10"/>
-    <rect x="88" y="330" width="124" height="10" fill="#08080c"/>
-    <ellipse cx="156" cy="420" rx="62" ry="6" fill="rgba(0,0,0,.5)"/>
-    <path d="M120 377 Q136 356 160 356 Q180 356 188 377 Z" fill="#1d47a8"/>
-    <path d="M124 375 Q138 360 160 360 Q176 360 184 375 Z" fill="#0f1420"/>
-    <path d="M102 402 Q104 380 122 376 L182 376 Q200 380 206 402 Z" fill="url(#carG)"/>
-    <rect x="100" y="399" width="110" height="14" rx="7" fill="url(#carG)"/>
-    <circle cx="126" cy="415" r="10" fill="#0b0b0e" stroke="#454550" stroke-width="3"/>
-    <circle cx="186" cy="415" r="10" fill="#0b0b0e" stroke="#454550" stroke-width="3"/>
-    <circle cx="126" cy="415" r="3.5" fill="#2c2c34"/><circle cx="186" cy="415" r="3.5" fill="#2c2c34"/>
-    <rect x="68" y="336" width="11" height="20" rx="3" fill="#e8e8ec"/>
-    <circle id="chgLed" cx="73.5" cy="341" r="1.8" fill="#34c759"/>
-    <path id="w_ev" class="wire" style="stroke:#2e2e35" d="M74 356 Q74 396 102 400"/>
-    <rect x="240" y="268" width="330" height="160" fill="url(#wallG)"/>
-    <ellipse cx="420" cy="424" rx="180" ry="7" fill="rgba(0,0,0,.4)"/>
-    <polygon points="222,268 340,180 606,180 588,268" fill="url(#roofG)"/>
-    <polygon points="222,268 340,180 606,180 588,268" fill="none" stroke="#4a4a55" stroke-width="1.5"/>
-    <polygon points="248,258 352,192 576,192 556,258" fill="url(#panelG)" stroke="#3f3f4b" stroke-width="1.5"/>
-    <path d="M300 258 L398 192 M352 258 L444 192 M404 258 L490 192 M456 258 L536 192 M274 225 L566 225" stroke="#232331" stroke-width="1.5" fill="none"/>
-    <polygon id="panelSheen" points="248,258 352,192 576,192 556,258" fill="rgba(255,214,10,.06)" class="nodePulse" opacity="0"/>
-    <rect x="474" y="300" width="34" height="54" rx="2" fill="#0d0d14" stroke="#464650"/>
-    <rect x="524" y="300" width="34" height="54" rx="2" fill="#0d0d14" stroke="#464650"/>
-    <path d="M491 300 V354 M474 327 H508 M541 300 V354 M524 327 H558" stroke="#2e2e38" stroke-width="1.5"/>
-    <rect x="476" y="302" width="30" height="16" fill="rgba(255,241,170,.10)"/>
-    <rect x="526" y="302" width="30" height="16" fill="rgba(255,241,170,.10)"/>
-    <path id="w_solar" class="wire" style="stroke:#2e2e35" d="M420 196 L420 330 Q420 344 432 346"/>
-    <path id="w_pw" class="wire" style="stroke:#2e2e35" d="M430 350 L352 372"/>
-    <path id="w_home" class="wire" style="stroke:#2e2e35" d="M448 342 Q468 338 474 328"/>
-    <path id="w_evfeed" class="wire" style="stroke:#2e2e35" d="M432 360 L240 386 L79 386 Q68 386 68 372 L68 356"/>
-    <rect x="430" y="336" width="18" height="26" rx="3" fill="#454550"/>
-    <rect x="431" y="337" width="16" height="3" fill="#54545f"/>
-    <rect x="306" y="336" width="46" height="88" rx="7" fill="url(#pwG)"/>
-    <rect x="306" y="336" width="46" height="88" rx="7" fill="none" stroke="rgba(255,255,255,.25)"/>
-    <rect x="311" y="343" width="4" height="74" rx="2" fill="#34c759" class="nodePulse"/>
-    <g stroke="#4a4a52" stroke-width="1">
-      <line x1="150" y1="104" x2="150" y2="330"/>
-      <line x1="420" y1="104" x2="420" y2="188"/>
-      <line x1="612" y1="104" x2="612" y2="296"/>
-      <line x1="329" y1="432" x2="329" y2="464"/>
-      <line x1="612" y1="418" x2="612" y2="464"/>
-    </g>
-    <text id="fCar" x="150" y="72" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
-    <text x="150" y="96" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">IONIQ 9</text>
-    <text id="fSolar" x="420" y="72" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
-    <text x="420" y="96" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">SOLAR</text>
-    <text id="fHome" x="612" y="72" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
-    <text x="612" y="96" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">HOME</text>
-    <text id="fPw" x="329" y="494" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
-    <text x="329" y="518" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">POWERWALL</text>
-    <text id="fGrid" x="612" y="494" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
-    <text x="612" y="518" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">GRID</text>
-  </svg>
+  <div style="display:flex;justify-content:space-around;max-width:760px;margin:6px auto 4px;text-align:center">
+    <div><div id="fCar" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">IONIQ 9</div></div>
+    <div><div id="fSolar" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">SOLAR</div></div>
+    <div><div id="fHome" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">HOME</div></div>
+  </div>
+  <div id="flow3dwrap" style="width:100%;max-width:760px;margin:auto">
+    <canvas id="flow3d" style="width:100%;display:block;border-radius:12px"></canvas>
+  </div>
+  <div style="display:flex;justify-content:center;gap:18%;max-width:760px;margin:4px auto 2px;text-align:center">
+    <div><div id="fPw" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">POWERWALL</div></div>
+    <div><div id="fGrid" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">GRID</div></div>
+  </div>
 </div>
 
 <div class="toolbar">
@@ -378,7 +319,98 @@ function rateAt(hhmm){ return isOffpeak(hhmm)?TARIFF.offpeak:TARIFF.peak }
 function sampleOffpeak(p){ return isOffpeak((p.t||'').slice(11,16)) || !!p.io || ((p.ev||0)>250) }
 function sampleRate(p){ return sampleOffpeak(p)?TARIFF.offpeak:TARIFF.peak }
 
-/* ---- Tesla-style live flow scene ---- */
+/* ---- 3D live flow scene (three.js) ---- */
+let F3={ready:false};
+function initFlow3D(){
+  if(!window.THREE||F3.ready)return;
+  const wrap=el('flow3dwrap'),canvas=el('flow3d');
+  if(!wrap||!canvas)return;
+  const W=()=>Math.max(300,wrap.clientWidth),H=()=>Math.round(W()*0.60);
+  const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+  renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+  const scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x141419);
+  scene.fog=new THREE.Fog(0x141419,10,17);
+  const cam=new THREE.PerspectiveCamera(33,1.66,0.1,60);
+  cam.position.set(5.4,4.4,7.6);
+  scene.add(new THREE.HemisphereLight(0x93a7ff,0x0c0c12,0.9));
+  const sun=new THREE.DirectionalLight(0xffffff,0.95);sun.position.set(4,8,5);scene.add(sun);
+  const mat=(c,o={})=>new THREE.MeshStandardMaterial({color:c,roughness:o.r??0.85,metalness:o.m??0.08,emissive:o.e??0x000000,emissiveIntensity:o.ei??1});
+  const box=(w,h,d,m,x,y,z)=>{const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);b.position.set(x,y,z);scene.add(b);return b};
+  const ground=new THREE.Mesh(new THREE.CircleGeometry(15,48),new THREE.MeshStandardMaterial({color:0x101016,roughness:1}));
+  ground.rotation.x=-Math.PI/2;scene.add(ground);
+  box(3.4,1.6,2.2,mat(0x2b2b33),1.2,0.8,0);
+  const roof=box(3.7,1.7,1.7,mat(0x3a3a44),1.2,1.7,0);roof.rotation.x=Math.PI/4;roof.scale.y=0.72;
+  const pan=box(2.7,0.06,1.05,mat(0x0d1420,{r:0.3,m:0.55,e:0x0d2b55,ei:0.35}),1.2,2.0,0.62);pan.rotation.x=-Math.PI/4;
+  F3.panel=pan;
+  box(0.42,0.6,0.02,mat(0xffe9a8,{e:0xffd980,ei:0.45}),1.9,0.78,1.11);
+  box(0.42,0.6,0.02,mat(0xffe9a8,{e:0xffd980,ei:0.45}),2.5,0.78,1.11);
+  box(0.52,1.02,0.14,mat(0xf2f2f5,{r:0.4}),0.25,0.6,1.18);
+  F3.led=box(0.05,0.86,0.02,mat(0x34c759,{e:0x34c759,ei:1.5}),0.03,0.6,1.26);
+  box(0.2,0.28,0.1,mat(0x44444e),1.0,0.5,1.14);
+  box(1.9,1.05,1.9,mat(0x26262e),-2.2,0.53,0.15);
+  box(2.05,0.12,2.05,mat(0x33333c),-2.2,1.11,0.15);
+  const car=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(1.5,0.36,0.8),mat(0x2f6fed,{r:0.32,m:0.55}));body.position.y=0.34;
+  const cab=new THREE.Mesh(new THREE.BoxGeometry(0.85,0.3,0.72),mat(0x14203c,{r:0.2,m:0.4}));cab.position.set(-0.06,0.64,0);
+  car.add(body,cab);
+  const wg=new THREE.CylinderGeometry(0.17,0.17,0.1,18),wm=mat(0x0c0c10,{r:0.6});
+  [[-0.48,0.38],[0.48,0.38],[-0.48,-0.38],[0.48,-0.38]].forEach(p=>{const w=new THREE.Mesh(wg,wm);w.rotation.x=Math.PI/2;w.position.set(p[0],0.17,p[1]);car.add(w)});
+  car.position.set(-2.2,0,1.3);scene.add(car);
+  box(0.14,0.3,0.08,mat(0xe9e9ee,{r:0.4}),-1.15,0.55,1.12);
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.07,2.6,10),mat(0x3a3a42));pole.position.set(5.1,1.3,-0.4);scene.add(pole);
+  box(0.9,0.07,0.07,mat(0x3a3a42),5.1,2.35,-0.4);
+  const cable=(pts)=>{const c=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)));
+    scene.add(new THREE.Mesh(new THREE.TubeGeometry(c,48,0.024,8),mat(0x24242c,{r:0.7})));return c};
+  F3.curves={
+    solar:cable([[1.2,2.3,0.4],[1.15,1.3,1.05],[1.02,0.62,1.14]]),
+    pw:   cable([[0.98,0.45,1.16],[0.6,0.38,1.24],[0.28,0.6,1.24]]),
+    home: cable([[1.06,0.55,1.14],[1.5,0.62,1.11],[1.85,0.72,1.05]]),
+    grid: cable([[1.06,0.4,1.16],[2.6,0.1,1.35],[4.0,0.4,0.6],[5.08,2.28,-0.35]]),
+    ev:   cable([[0.96,0.34,1.18],[-0.2,0.07,1.45],[-1.15,0.42,1.14],[-1.62,0.14,1.35],[-2.0,0.3,1.32]]),
+  };
+  const tex=(()=>{const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');
+    const g2=x.createRadialGradient(32,32,0,32,32,32);
+    g2.addColorStop(0,'rgba(255,255,255,1)');g2.addColorStop(0.35,'rgba(255,255,255,.8)');g2.addColorStop(1,'rgba(255,255,255,0)');
+    x.fillStyle=g2;x.fillRect(0,0,64,64);return new THREE.CanvasTexture(c)})();
+  F3.flows={};
+  for(const k of Object.keys(F3.curves)){
+    const grp=new THREE.Group();scene.add(grp);
+    const sprites=[];
+    for(let i=0;i<8;i++){
+      const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0xffffff,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true}));
+      s.scale.set(0.17,0.17,1);s.visible=false;grp.add(s);sprites.push(s);
+    }
+    F3.flows[k]={sprites,speed:0,dir:1,n:0,color:new THREE.Color(0xffffff),on:false,phase:Math.random()};
+  }
+  const clock=new THREE.Clock();let T=0;
+  function frame(){
+    requestAnimationFrame(frame);
+    const dt=Math.min(0.05,clock.getDelta());T+=dt;
+    cam.position.x=5.4+Math.sin(T*0.16)*0.3;
+    cam.position.y=4.4+Math.sin(T*0.11)*0.15;
+    cam.lookAt(0.5,0.8,0.2);
+    for(const k in F3.flows){
+      const f=F3.flows[k],c=F3.curves[k];
+      f.phase+=dt*f.speed*f.dir;
+      f.sprites.forEach((s,i)=>{
+        if(!f.on||i>=f.n){s.visible=false;return}
+        s.visible=true;
+        let t=(f.phase+i/f.n)%1; if(t<0)t+=1;
+        s.position.copy(c.getPointAt(t));
+        s.material.color.copy(f.color);
+      });
+    }
+    const w=W(),h=H();
+    if(Math.abs(canvas.clientWidth-w)>2||canvas.height!==Math.round(h*renderer.getPixelRatio())){
+      renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();
+    }
+    renderer.render(scene,cam);
+  }
+  renderer.setSize(W(),H(),false);cam.aspect=W()/H();cam.updateProjectionMatrix();
+  frame();
+  F3.ready=true;
+}
 function renderFlow(L){
   const kwf=w=>((Math.abs(w||0))/1000).toFixed(1)+' kW';
   const ev=(((LAST||{}).ohme&&!(LAST.ohme||{}).error&&(LAST.ohme.power||{}).watts)||0);
@@ -388,18 +420,20 @@ function renderFlow(L){
   el('fCar').textContent=kwf(ev);
   const soc=L.percentage_charged||0;
   el('fPw').textContent=kwf(L.battery_power)+' · '+soc.toFixed(0)+'%';
-  const set=(id,on,color,rev)=>{const p=el(id);if(!p)return;p.classList.toggle('active',!!on);p.classList.toggle('rev',!!rev);
-    p.style.stroke=on?color:'#2e2e35';p.style.filter=on?`drop-shadow(0 0 5px ${color})`:''};
-  set('w_solar',(L.solar_power||0)>50,'#ffd60a');
-  // path is drawn junction→powerwall: discharge (battery_power>0) flows the other way
-  set('w_pw',Math.abs(L.battery_power||0)>50,'#34c759',(L.battery_power||0)>0);
-  // path is drawn junction→grid: import (grid_power>0) flows the other way
-  set('w_grid',Math.abs(L.grid_power||0)>50,(L.grid_power||0)>0?'#ff453a':'#34c759',(L.grid_power||0)>0);
-  set('w_home',(L.load_power||0)>50,'#58a6ff');
-  set('w_ev',ev>250,'#58a6ff');
-  set('w_evfeed',ev>250,'#58a6ff');
-  const sheen=el('panelSheen'); if(sheen) sheen.setAttribute('opacity',(L.solar_power||0)>50?'1':'0');
-  const led=el('chgLed'); if(led) led.setAttribute('fill',ev>250?'#34c759':'#3a3a42');
+  initFlow3D();
+  if(F3.ready){
+    // particle speed and count scale with power; direction follows reality
+    const setF=(k,w,color,dir)=>{const f=F3.flows[k];const a=Math.abs(w||0);
+      f.on=a>50;f.speed=0.05+Math.min(0.45,a/9000);f.dir=dir||1;
+      f.n=Math.max(2,Math.min(8,Math.round(a/900)+2));f.color.set(color)};
+    setF('solar',L.solar_power,0xffd60a,1);
+    setF('pw',L.battery_power,0x34c759,(L.battery_power||0)>0?-1:1);
+    setF('home',L.load_power,0x58a6ff,1);
+    setF('grid',L.grid_power,(L.grid_power||0)>0?0xff453a:0x34c759,(L.grid_power||0)>0?-1:1);
+    setF('ev',ev>250?ev:0,0x58a6ff,1);
+    if(F3.led)F3.led.material.emissiveIntensity=Math.abs(L.battery_power||0)>50?1.6:0.5;
+    if(F3.panel)F3.panel.material.emissiveIntensity=(L.solar_power||0)>50?0.7:0.2;
+  }
   let st='Idle';
   if(ev>250)st='Charging';
   else if((L.grid_power||0)<-50)st='Exporting';
