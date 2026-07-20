@@ -111,6 +111,8 @@ async function loadState(env) {
   if (!state.mig_en1) { state.energyDeepFill = 0; state.lastEnergy = 0; state.mig_en1 = 1; }
   // one-time migration (2026-07-17f): refresh octopus promptly to pull Home Mini telemetry
   if (!state.mig_tel1) { state.lastOcto = 0; state.mig_tel1 = 1; }
+  // one-time migration (2026-07-20): hot water to 65° during Ohme slots (requested)
+  if (!state.mig_dhw1) { state.config.dhw_ohme_slots = true; state.mig_dhw1 = 1; }
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -487,6 +489,17 @@ async function fetchOhme(env, state) {
 }
 
 /* ---------------- automation ---------------- */
+async function vaillantSetDhw(env, state, temp) {
+  const tok = await vaillantToken(env, state);
+  const base = (state.vaillantCtrl === "vrc700" ? VAILLANT_API.replace("end-user-app-api/v1", "vrc700/v1") : VAILLANT_API)
+    + `/systems/${state.vaillantSys}/${state.vaillantCtrl || "tli"}`;
+  const r = await fetch(`${base}/domestic-hot-water/0/temperature`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json", "x-app-identifier": "VAILLANT", "Accept-Language": "en-GB", "x-client-locale": "en-GB", "x-idm-identifier": "KEYCLOAK", "ocp-apim-subscription-key": "1e0a2f3511fb4c5bbb1c7f9fedd20b1c", "User-Agent": "okhttp/4.9.2" },
+    body: JSON.stringify({ setpoint: Math.round(temp) }),
+  });
+  if (!r.ok && r.status !== 204) throw new Error(`dhw set ${r.status}: ${(await r.text()).slice(0, 80)}`);
+}
 async function applyAutomation(env, state, sid, siteInfo, log) {
   const cfg = state.config;
   const setReserve = async (pct, why) => {
@@ -512,6 +525,24 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     const day = cfg.day || {};
     if (inSlot) { await setReserve(100, "ohme slot"); await setGridCharging(true, "ohme slot"); }
     else { await setReserve(day.reserve ?? 0, "outside ohme slots"); await setGridCharging(!!day.allow_grid_charging, "outside ohme slots"); }
+  }
+  // heat the hot water tank to 65° during Ohme off-peak slots, restore after
+  if (cfg.dhw_ohme_slots && env.MYVAILLANT_EMAIL && state.vaillantSys) {
+    const ohmeOk2 = state.ohmeData && !state.ohmeData.error;
+    const nowIso2 = new Date().toISOString();
+    const inSlot2 = ohmeOk2 && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso2 && nowIso2 < sl.end);
+    try {
+      if (inSlot2 && !state.dhwBoosted) {
+        state.dhwPrev = (((state.home || {}).vaillant) || {}).dhwTarget ?? 50;
+        await vaillantSetDhw(env, state, 65);
+        state.dhwBoosted = 1;
+        log.push(`hot water -> 65° (ohme slot, was ${state.dhwPrev}°)`);
+      } else if (!inSlot2 && state.dhwBoosted) {
+        await vaillantSetDhw(env, state, state.dhwPrev ?? 50);
+        log.push(`hot water -> ${state.dhwPrev ?? 50}° (slot ended)`);
+        state.dhwBoosted = 0;
+      }
+    } catch (e) { log.push("dhw automation: " + String(e).slice(0, 100)); }
   }
   if (cfg.enabled) {
     const cw = cfg.cheap_window || {};
@@ -985,6 +1016,12 @@ async function runCommand(env, state, command, value) {
   } else if (command === "follow_ohme") {
     state.config.follow_ohme_slots = value === "on";
     log.push(`follow ohme slots -> ${value}`);
+  } else if (command === "dhw_ohme") {
+    state.config.dhw_ohme_slots = value === "on";
+    if (value !== "on" && state.dhwBoosted) {
+      try { await vaillantSetDhw(env, state, state.dhwPrev ?? 50); state.dhwBoosted = 0; log.push(`hot water restored to ${state.dhwPrev ?? 50}°`); } catch (e) {}
+    }
+    log.push(`hot water in ohme slots -> ${value}`);
   } else if (command === "automation") {
     state.config.enabled = value === "on";
     log.push(`automation -> ${value}`);
