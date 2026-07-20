@@ -42,9 +42,13 @@
 </nav>
 <h1>Heating</h1>
 <div class="sub" id="sub">…</div>
-<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
   <button onclick="cmd('tado_presence','HOME')">Home mode</button>
   <button style="background:#e8e8ed;color:var(--txt)" onclick="cmd('tado_presence','AWAY')">Away mode</button>
+  <span style="width:10px"></span>
+  <input id="allT" type="number" step="0.5" min="5" max="30" value="20" style="width:62px">
+  <button onclick="cmd('tado_set_all',val('allT'))">Set all rooms</button>
+  <button style="background:#e8e8ed;color:var(--txt)" onclick="cmd('tado_resume_all','')">All auto</button>
 </div>
 <div class="err" id="err"></div>
 <div class="grid" id="rooms"></div>

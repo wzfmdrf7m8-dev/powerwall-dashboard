@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Heat pump">
 <meta name="theme-color" content="#f5f5f7">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
   :root{--bg:#f5f5f7;--card:#fff;--edge:rgba(0,0,0,.05);--txt:#1d1d1f;--dim:#6e6e73;
     --mint:#34c759;--sun:#ff9500;--cyan:#007aff;--pink:#ff3b30}
@@ -48,6 +49,19 @@
 </div>
 <div class="err" id="err"></div>
 <div class="grid" id="cards"></div>
+<div class="card" style="margin-bottom:18px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <h3 style="font-size:13px;font-weight:600;color:var(--dim);flex:1">ENERGY USED</h3>
+    <select id="eperiod" onchange="renderReport()">
+      <option value="day">Days</option>
+      <option value="week">Weeks</option>
+      <option value="month">Months</option>
+      <option value="year">Years</option>
+    </select>
+  </div>
+  <div id="etotal" style="font-size:22px;font-weight:700;margin-bottom:6px">–</div>
+  <canvas id="echart" height="120"></canvas>
+</div>
 <div class="grid" id="zones"></div>
 
 <div id="overlay" style="display:none"><div class="box">
@@ -74,16 +88,41 @@ async function loadHome(pass){
   return JSON.parse(new TextDecoder().decode(pt));
 }
 function card(h,v,m,cls){return `<div class="card"><h3>${h}</h3><div class="v ${cls||''}">${v}</div><div class="m">${m||''}</div></div>`}
+let EDAILY=[],ECHART=null;
+function renderReport(){
+  const p=el('eperiod').value;
+  const agg={};
+  for(const r of EDAILY){
+    let k;
+    if(p==='day')k=r.d;
+    else if(p==='week'){const dt=new Date(r.d+'T12:00:00Z');const off=(dt.getUTCDay()+6)%7;k=new Date(+dt-off*864e5).toISOString().slice(0,10)}
+    else if(p==='month')k=r.d.slice(0,7);
+    else k=r.d.slice(0,4);
+    agg[k]=(agg[k]||0)+(r.kwh||0);
+  }
+  const keys=Object.keys(agg).sort();
+  const show=p==='day'?keys.slice(-31):p==='week'?keys.slice(-26):p==='month'?keys.slice(-24):keys;
+  const nowKey=show[show.length-1];
+  el('etotal').textContent=nowKey?((Math.round(agg[nowKey]*10)/10)+' kWh this '+(p==='day'?'day':p)+' · '+(Math.round((agg[nowKey]*TARIFFISH)*10)/10>=100?'£'+(agg[nowKey]*TARIFFISH/100).toFixed(2):Math.round(agg[nowKey]*TARIFFISH)+'p')+' est.'):'no data yet';
+  const labels=show.map(k=>p==='day'?k.slice(5):p==='week'?('w/c '+k.slice(5)):k);
+  if(ECHART)ECHART.destroy();
+  ECHART=new Chart(el('echart'),{type:'bar',data:{labels,datasets:[{label:'kWh',data:show.map(k=>Math.round(agg[k]*100)/100),backgroundColor:'rgba(255,149,0,.85)',borderRadius:4}]},
+    options:{animation:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4}},x:{ticks:{maxTicksLimit:10,color:'#6e6e73'},grid:{display:false}}}}});
+}
+const TARIFFISH=9; // rough blended p/kWh for the estimate line
 function render(d){
   const v=d.vaillant||{};
   el('err').textContent=v.error?('vaillant: '+v.error):'';
   el('sub').textContent=(v.outdoor!=null?`outdoor ${v.outdoor.toFixed(1)}° · `:'')+'updated '+(d.generated_at||'').slice(11,16);
   const cards=[];
+  if(v.power!=null) cards.push(card('Drawing now',(v.power/1000).toFixed(2)+' kW',v.power>100?'running':'standby',v.power>100?'warn':'ok'));
   if(v.flowTemp!=null) cards.push(card('Flow temperature',v.flowTemp.toFixed(0)+'°',''));
   if(v.dhwTemp!=null) cards.push(card('Hot water tank',v.dhwTemp.toFixed(0)+'°',v.dhwTarget!=null?('target '+v.dhwTarget.toFixed(0)+'°'):''));
   if(v.pressure!=null) cards.push(card('Pressure',v.pressure.toFixed(1)+' bar',v.pressure>=1&&v.pressure<=2.5?'healthy':'check pressure',v.pressure>=1&&v.pressure<=2.5?'ok':'warn'));
   if(v.outdoor!=null) cards.push(card('Outdoor sensor',v.outdoor.toFixed(1)+'°',''));
   el('cards').innerHTML=cards.join('')||'<div class="sub">No heat pump data yet — add your myVAILLANT credentials (I’ll walk you through it).</div>';
+  EDAILY=v.energyDaily||[];
+  renderReport();
   el('zones').innerHTML=(v.zones||[]).map((z,i)=>`
     <div class="card">
       <h3>${z.name}</h3>

@@ -91,10 +91,10 @@ function render(d){
   ];
   el('cards').innerHTML=cards.join('');
   const nodes=(n.nodes||[]).map(x=>`<tr><td>${x.location||'–'}</td><td>${x.model||''}</td><td class="${x.status==='green'?'ok':'warn'}">${x.status||''}</td><td>${x.id?`<button style="padding:4px 10px;font-size:12px;background:#e8e8ed;color:var(--txt)" onclick="if(confirm('Reboot ${(x.location||'this eero').replace(/'/g,'')}?'))cmd('eero_reboot','${x.id}')">Reboot</button>`:''}</td></tr>`).join('');
-  const devs=(n.devices||[]).map(x=>`<tr><td>${(x.name||'').slice(0,34)}</td><td>${x.ip||''}</td><td>${x.wireless?(x.band||'wifi'):'wired'}</td></tr>`).join('');
+  const devs=(n.devices||[]).map(x=>`<tr><td>${(x.name||'').slice(0,34)}${x.paused?' <span style="color:var(--pink);font-size:11px">paused</span>':''}</td><td>${x.ip||''}</td><td>${x.wireless?(x.band||'wifi'):'wired'}</td><td>${x.url?`<button style="padding:4px 10px;font-size:12px;background:#e8e8ed;color:var(--txt)" onclick="cmd('eero_pause','${x.url}|${x.paused?'off':'on'}')">${x.paused?'Resume':'Pause'}</button>`:''}</td></tr>`).join('');
   el('devices').innerHTML=
     (nodes?`<table style="margin-bottom:14px"><tr><th>eero</th><th>model</th><th>status</th><th></th></tr>${nodes}</table>`:'')+
-    (devs?`<table><tr><th>device</th><th>ip</th><th>connection</th></tr>${devs}</table>`:'');
+    (devs?`<table><tr><th>device</th><th>ip</th><th>connection</th><th></th></tr>${devs}</table>`:'');
 }
 const val=id=>document.getElementById(id).value;
 async function cmd(c,v){
