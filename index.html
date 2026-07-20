@@ -131,7 +131,7 @@
   <div style="display:flex;justify-content:center;gap:18%;max-width:760px;margin:4px auto 2px;text-align:center">
     <div><div id="fPw" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">POWERWALL</div></div>
     <div><div id="fHp" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">HEAT PUMP</div></div>
-    <div><div id="fGrid" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">GRID</div><div id="fGridDay" style="font-size:11px;color:#9a9aa2;margin-top:1px"></div></div>
+    <div><div id="fGrid" style="font-size:32px;font-weight:800;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">GRID · METER</div><div id="fGridDay" style="font-size:11px;color:#9a9aa2;margin-top:1px"></div></div>
   </div>
 </div>
 
@@ -456,7 +456,10 @@ function renderFlow(L){
   el('fSolar').textContent=kwf(L.solar_power);
   el('fHome').textContent=kwf(homeW);
   el('fHp').textContent=kwf(hp);
-  el('fGrid').textContent=kwf(L.grid_power);
+  const meterW=(L.grid_power||0)+ev; // what the Octopus meter sees: Tesla grid + EV circuit
+  {const g=el('fGrid');
+   g.textContent=(Math.abs(meterW)/1000).toFixed(1)+' kW';
+   g.style.color=meterW>50?'#ff453a':(meterW<-50?'#34c759':'#f5f5f7');}
   el('fCar').textContent=kwf(ev);
   const soc=L.percentage_charged||0;
   el('fPw').textContent=kwf(L.battery_power)+' · '+soc.toFixed(0)+'%';
