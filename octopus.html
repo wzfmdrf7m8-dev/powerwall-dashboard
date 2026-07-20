@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><script>
+/* powerwall-dashboard shim: reroute /api/* to the worker's /octo/* proxy, shared pw_pass unlock, nav pills */
+(function(){
+  const WORKER='https://powerwall-api.randlefamily.com';
+  const orig=window.fetch.bind(window);
+  window.fetch=function(u,o){
+    try{
+      const s=(typeof u==='string')?u:((u&&u.url)||'');
+      if(s.indexOf('/api/')===0){
+        o=Object.assign({},o||{});
+        o.headers=Object.assign({},o.headers||{},{'x-auth':localStorage.getItem('pw_pass')||''});
+        return orig(WORKER+'/octo'+s.slice(4),o).then(function(r){if(r.status===401)showUnlock();return r});
+      }
+    }catch(e){}
+    return orig(u,o);
+  };
+  window.showUnlock=function(){
+    if(document.getElementById('pwovl'))return;
+    var d=document.createElement('div');d.id='pwovl';
+    d.style.cssText='position:fixed;inset:0;background:#f5f5f7;display:flex;align-items:center;justify-content:center;z-index:9999';
+    d.innerHTML='<div style="background:#fff;border:1px solid rgba(0,0,0,.08);padding:32px;border-radius:22px;width:320px;text-align:center;font-family:-apple-system,sans-serif"><div style="font-size:18px;font-weight:700;margin-bottom:12px;color:#1d1d1f">Unlock</div><input id="pwin" type="password" placeholder="Password" style="width:100%;padding:8px 12px;border-radius:10px;border:1px solid #d2d2d7;margin-bottom:10px;font:inherit"><br><button id="pwgo" style="background:#0071e3;color:#fff;border:0;font-weight:600;cursor:pointer;border-radius:980px;padding:8px 16px;font:inherit">Open</button></div>';
+    document.body.appendChild(d);
+    var go=function(){localStorage.setItem('pw_pass',document.getElementById('pwin').value);location.reload()};
+    d.querySelector('#pwgo').onclick=go;
+    d.querySelector('#pwin').addEventListener('keydown',function(e){if(e.key==='Enter')go()});
+  };
+  addEventListener('DOMContentLoaded',function(){
+    if(!localStorage.getItem('pw_pass'))showUnlock();
+    var n=document.createElement('nav');
+    n.style.cssText='display:flex;gap:8px;margin:0 0 14px;flex-wrap:wrap';
+    n.innerHTML='<a href="./" style="text-decoration:none;color:#1d1d1f;background:#fff;border:1px solid #e5e5ea;border-radius:99px;padding:6px 16px;font-size:13px;font-weight:600">⚡ Energy</a><a href="heating" style="text-decoration:none;color:#1d1d1f;background:#fff;border:1px solid #e5e5ea;border-radius:99px;padding:6px 16px;font-size:13px;font-weight:600">🌡 Heating</a><a href="heatpump" style="text-decoration:none;color:#1d1d1f;background:#fff;border:1px solid #e5e5ea;border-radius:99px;padding:6px 16px;font-size:13px;font-weight:600">♨️ Heat pump</a><a href="network" style="text-decoration:none;color:#1d1d1f;background:#fff;border:1px solid #e5e5ea;border-radius:99px;padding:6px 16px;font-size:13px;font-weight:600">📶 Network</a><a href="octopus" style="text-decoration:none;color:#fff;background:#1d1d1f;border:1px solid #1d1d1f;border-radius:99px;padding:6px 16px;font-size:13px;font-weight:600">🐙 Octopus</a>';
+    document.body.insertBefore(n,document.body.firstChild);
+    document.querySelectorAll('a[href="/logout"]').forEach(function(a){a.remove()});
+  });
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Octopus Energy Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f5f7; --panel: #ffffff; --text: #1d1d1f; --muted: #86868b;
+    --accent: #0071e3; --green: #34c759; --amber: #ff9500; --red: #ff3b30; --blue: #0071e3;
+    --border: rgba(0,0,0,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-font-smoothing: antialiased; }
+  body { background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; min-height: 100vh; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 28px; flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,0.72);
+    backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
+  header .octo { font-size: 24px; }
+  #status { font-size: 13px; color: var(--muted); margin-left: auto; display: flex; align-items: center; gap: 14px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; margin-right: 5px; }
+  .dot.ok { background: var(--green); }
+  .dot.err { background: var(--red); }
+  button { background: var(--accent); color: #fff; border: none; border-radius: 980px; padding: 8px 18px;
+    font-size: 13px; font-weight: 500; font-family: inherit; cursor: pointer; transition: background .18s, transform .18s; }
+  button:hover { background: #0077ed; transform: scale(1.03); }
+  button.ghost { background: rgba(0,0,0,0.05); color: var(--text); }
+  button.ghost:hover { background: rgba(0,0,0,0.1); }
+  main { padding: 28px; max-width: 1400px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: var(--panel); border-radius: 18px; padding: 20px 22px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04), 0 8px 32px rgba(0,0,0,0.04);
+    transition: transform .25s cubic-bezier(.2,.8,.3,1), box-shadow .25s; animation: fadeUp .6s both; }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.07), 0 16px 48px rgba(0,0,0,0.07); }
+  .card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
+  .card .value { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .card .value .unit { font-size: 14px; font-weight: 400; color: var(--muted); }
+  .card .value.pos { color: var(--green); }
+  .card .value.neg { color: var(--red); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border-radius: 18px; padding: 24px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04), 0 8px 32px rgba(0,0,0,0.04); animation: fadeUp .7s both; }
+  .panel h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
+  .panel h2 span.tag { font-size: 11px; color: var(--muted); font-weight: 400; text-align: right; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  .chart-wrap { position: relative; height: 260px; }
+  .totals { display: flex; gap: 10px; flex-wrap: wrap; margin: -2px 0 16px; }
+  .chip { font-size: 13px; font-weight: 600; padding: 7px 15px; border-radius: 980px; }
+  .chip.out { color: var(--red); background: rgba(255,59,48,0.09); }
+  .chip.in  { color: var(--green); background: rgba(52,199,89,0.1); }
+  .chip.net { color: var(--accent); background: rgba(0,113,227,0.09); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.05); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr { transition: background .15s; }
+  tbody tr:hover { background: rgba(0,0,0,0.025); }
+  #heatmap { display: grid; gap: 2px; font-size: 10px; }
+  #heatmap .hm-cell { aspect-ratio: 1.6; border-radius: 3px; min-width: 0; transition: transform .12s, filter .12s; }
+  #heatmap .hm-cell:hover { transform: scale(1.6); filter: brightness(1.08); z-index: 5; }
+  #heatmap .hm-lab { color: var(--muted); display: flex; align-items: center; font-size: 10px; padding-right: 4px; }
+  .hm-scale { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-top: 10px; }
+  .hm-scale .swatch { width: 26px; height: 10px; border-radius: 3px; }
+  #gauge svg { display: block; margin-top: 2px; }
+  #banner { display: none; background: rgba(255,59,48,0.08); border: 1px solid rgba(255,59,48,0.3); color: var(--red);
+    padding: 10px 16px; border-radius: 12px; font-size: 13px; margin-bottom: 18px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .good { color: var(--green); } .bad { color: var(--red); }
+  details summary { color: var(--muted); } details summary:hover { color: var(--text); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-left: 6px; animation: pulse 2s infinite; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="octo">🐙</span>
+  <h1>Octopus Energy Dashboard</h1>
+  <div id="status">
+    <span><span class="dot" id="connDot"></span><span id="connText">Not connected</span></span>
+    <span id="lastUpdated"></span>
+    <button class="ghost" onclick="location.href='/logout'">Sign out</button>
+    <button onclick="refreshAll()">Refresh</button>
+  </div>
+</header>
+
+<main>
+  <div id="banner"></div>
+
+  <div class="cards">
+    <div class="card" id="balanceCard" style="display:none"><div class="label">Account Balance</div><div class="value" id="balance">–</div><div class="sub">from Octopus GraphQL API</div></div>
+    <div class="card"><div class="label">Current Elec Unit Rate</div><div class="value" id="curRate">–</div><div class="sub" id="curRateSub"></div></div>
+    <div class="card"><div class="label">Price Dial — Today</div><div id="gauge"></div><div class="sub" id="gaugeSub"></div></div>
+    <div class="card" id="liveCard" style="display:none"><div class="label">Live Power<span class="live-dot"></span></div><div class="value" id="livePower">–</div><div class="sub" id="liveSub"></div></div>
+    <div class="card"><div class="label">Standing Charge (Elec)</div><div class="value" id="standCharge">–</div><div class="sub">per day, inc VAT</div></div>
+    <div class="card"><div class="label">Last 7 Days — True Cost</div><div class="value" id="weekCost">–</div><div class="sub" id="weekUsage"></div></div>
+    <div class="card"><div class="label">Yesterday</div><div class="value" id="yesterdayCost">–</div><div class="sub" id="yesterdayUsage"></div></div>
+    <div class="card" id="gasCard" style="display:none"><div class="label">Gas Used (Last 7 Days)</div><div class="value" id="gasWeekUsage">–</div><div class="sub">meter units</div></div>
+    <div class="card" id="exportCard" style="display:none"><div class="label">Exported (Last 7 Days)</div><div class="value" id="exportWeek">–</div><div class="sub">solar / battery export</div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" id="balancePanel" style="display:none">
+      <h2>Account Balance — 12 Months <span class="tag">cumulative balance after each transaction · £ (credit positive)</span></h2>
+      <div id="balanceTotals" class="totals"></div>
+      <div class="chart-wrap"><canvas id="balanceChart"></canvas></div>
+      <details style="margin-top:12px">
+        <summary style="font-size:12px;color:var(--muted);cursor:pointer">Recent transactions</summary>
+        <table id="txnTable" style="margin-top:8px"><tbody></tbody></table>
+      </details>
+    </div>
+    <div class="panel" id="balancePanelYtd" style="display:none">
+      <h2>Account Balance — Year to Date <span class="tag">since 1 January · updates through the year</span></h2>
+      <div id="balanceTotalsYtd" class="totals"></div>
+      <div class="chart-wrap"><canvas id="balanceChartYtd"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" id="livePanel" style="display:none; grid-column: 1 / -1;">
+      <h2>Live Usage <span class="tag">last 30 minutes · watts · Home Mini, updates every 30s</span></h2>
+      <div class="chart-wrap"><canvas id="liveChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Daily Cost — Exact <span class="tag">14 days · half-hourly usage × half-hourly rates + standing charge</span></h2>
+      <div class="chart-wrap"><canvas id="costChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Daily Electricity Consumption <span class="tag">last 14 days · kWh</span></h2>
+      <div class="chart-wrap"><canvas id="dailyChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" id="solarPanel" style="display:none">
+      <h2>Solar Export <span class="tag">last 14 days · kWh exported to grid</span></h2>
+      <div class="chart-wrap"><canvas id="exportChart"></canvas></div>
+      <p style="font-size:11px;color:var(--muted);margin-top:10px" id="solarNote">Note: this is grid export from your export meter, not gross generation (self-consumed solar isn't visible to Octopus).</p>
+    </div>
+    <div class="panel" id="comparePanel" style="display:none">
+      <h2>Tariff Comparison <span class="tag">your last 14 days of usage, repriced</span></h2>
+      <table id="compareTable"><tbody></tbody></table>
+      <p style="font-size:11px;color:var(--muted);margin-top:10px" id="compareNote"></p>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" style="grid-column: 1 / -1;">
+      <h2>Usage Heatmap <span class="tag">day × time of day · darker blue = more usage</span></h2>
+      <div id="heatmap"></div>
+      <div class="hm-scale">low <span class="swatch" style="background:#e8e8ed"></span><span class="swatch" style="background:#c7d9f7"></span><span class="swatch" style="background:#8ab4f0"></span><span class="swatch" style="background:#4090e8"></span><span class="swatch" style="background:#0071e3"></span> high</div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" id="agilePanel" style="display:none">
+      <h2>Agile Unit Rates <span class="tag">today &amp; tomorrow · p/kWh inc VAT</span></h2>
+      <div class="chart-wrap"><canvas id="agileChart"></canvas></div>
+    </div>
+    <div class="panel" id="insightsPanel" style="display:none">
+      <h2>Agile Insights <span class="tag">upcoming published rates</span></h2>
+      <table id="insightsTable"><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Account &amp; Tariff</h2>
+      <table id="acctTable"><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <h2>Usage Pattern <span class="tag">14-day averages</span></h2>
+      <table id="patternTable"><tbody></tbody></table>
+    </div>
+  </div>
+</main>
+
+<footer>Data from api.octopus.energy via secure server-side proxy · auto-refreshes every 15 min</footer>
+
+<script>
+const API = '/api'; // server-side proxy — no credentials in the browser
+const DAYS = 14;
+let charts = {};
+
+// ---------- Visual theme ----------
+if (window.Chart) {
+  Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif";
+  Chart.defaults.animation.duration = 1400;
+  Chart.defaults.animation.easing = 'easeOutQuart';
+}
+// Scriptable vertical gradient fill for bars
+function barGrad(hex) {
+  return (c) => {
+    const { ctx, chartArea } = c.chart;
+    if (!chartArea) return hex;
+    const g = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+    g.addColorStop(0, hex + '22');
+    g.addColorStop(1, hex);
+    return g;
+  };
+}
+// SVG half-dial: where today's current price sits between today's min and max
+function renderGauge(unitRates) {
+  const el = document.getElementById('gauge');
+  if (!el) return;
+  const cur = currentRate(unitRates);
+  if (!cur) { el.innerHTML = ''; document.getElementById('gaugeSub').textContent = 'no rate data'; return; }
+  const today = filterPayment(unitRates).filter(r => r.valid_from.slice(0, 10) === isoDate(new Date())).map(r => r.value_inc_vat);
+  const vals = today.length ? today : [cur.value_inc_vat];
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const frac = max > min ? Math.min(1, Math.max(0, (cur.value_inc_vat - min) / (max - min))) : 0.5;
+  const cx = 90, cy = 86, r = 66;
+  const ang = Math.PI * (1 - frac);
+  const nx = cx + r * 0.74 * Math.cos(ang), ny = cy - r * 0.74 * Math.sin(ang);
+  const arc = (f0, f1, color) => {
+    const a0 = Math.PI * (1 - f0), a1 = Math.PI * (1 - f1);
+    const x0 = cx + r * Math.cos(a0), y0 = cy - r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1), y1 = cy - r * Math.sin(a1);
+    return `<path d="M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r} ${r} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}" stroke="${color}" stroke-width="11" fill="none" stroke-linecap="round" opacity="0.9"/>`;
+  };
+  el.innerHTML = `<svg viewBox="0 0 180 98" style="width:100%;max-width:210px">
+    ${arc(0.02, 0.32, '#34c759')}${arc(0.35, 0.65, '#ff9500')}${arc(0.68, 0.98, '#ff3b30')}
+    <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="#1d1d1f" stroke-width="3.5" stroke-linecap="round"/>
+    <circle cx="${cx}" cy="${cy}" r="5.5" fill="#1d1d1f"/>
+    <text x="${cx}" y="58" text-anchor="middle" fill="#1d1d1f" font-size="18" font-weight="700" font-family="-apple-system, sans-serif">${fmt(cur.value_inc_vat, 1)}p</text>
+  </svg>`;
+  document.getElementById('gaugeSub').textContent =
+    (max > min ? `today ranges ${fmt(min, 1)}–${fmt(max, 1)} p/kWh` : 'flat rate all day');
+}
+
+async function get(path) {
+  const res = await fetch(API + path);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} on ${path}`);
+  return res.json();
+}
+
+// Follow pagination (absolute Octopus URLs are rewritten back through the proxy)
+async function getAll(path, _auth = true, maxPages = 5) {
+  let url = API + path, results = [], pages = 0;
+  while (url && pages < maxPages) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const data = await res.json();
+    results = results.concat(data.results || []);
+    if (data.next) { const u = new URL(data.next); url = API + u.pathname + u.search; } else url = null;
+    pages++;
+  }
+  return results;
+}
+
+// ---------- Helpers ----------
+function setStatus(ok, text) {
+  document.getElementById('connDot').className = 'dot ' + (ok ? 'ok' : 'err');
+  document.getElementById('connText').textContent = text;
+}
+function banner(msg) {
+  const b = document.getElementById('banner');
+  if (msg) { b.textContent = msg; b.style.display = 'block'; } else { b.style.display = 'none'; }
+}
+function fmt(n, dp = 2) { return n == null || isNaN(n) ? '–' : Number(n).toFixed(dp); }
+function gbp(pence) { return pence == null ? '–' : '£' + (pence / 100).toFixed(2); }
+function isoDate(d) { return d.toISOString().slice(0, 10); }
+
+// Tariff code E-1R-AGILE-24-10-01-C -> product AGILE-24-10-01, region C
+function productFromTariff(code) { return code.split('-').slice(2, -1).join('-'); }
+function regionFromTariff(code) { return code.split('-').slice(-1)[0]; }
+
+function activeAgreement(agreements) {
+  const now = new Date();
+  return agreements.find(a =>
+    new Date(a.valid_from) <= now && (!a.valid_to || new Date(a.valid_to) > now)
+  ) || agreements[agreements.length - 1];
+}
+
+// Flat tariffs duplicate rates per payment method — prefer DIRECT_DEBIT, else null
+function filterPayment(rates) {
+  const dd = rates.filter(r => r.payment_method === 'DIRECT_DEBIT');
+  const nul = rates.filter(r => !r.payment_method);
+  return dd.length ? dd : (nul.length ? nul : rates);
+}
+
+// Build a fast lookup: for timestamp t, find rate valid at t (rates sorted asc)
+function makeRateLookup(rates) {
+  const sorted = filterPayment(rates).slice().sort((a, b) => a.valid_from.localeCompare(b.valid_from));
+  return function (tIso) {
+    const t = new Date(tIso);
+    // binary search last valid_from <= t
+    let lo = 0, hi = sorted.length - 1, best = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (new Date(sorted[mid].valid_from) <= t) { best = sorted[mid]; lo = mid + 1; } else hi = mid - 1;
+    }
+    if (best && (!best.valid_to || new Date(best.valid_to) > t)) return best;
+    return null;
+  };
+}
+
+// ---------- Data loading ----------
+async function discoverAccount() {
+  const acct = await get('/account');
+  if (acct.error) throw new Error(acct.error);
+  const prop = acct.properties.find(p => !p.moved_out_at) || acct.properties[0];
+  const result = { elec: null, gas: null, exp: null, prop, number: acct.number };
+
+  for (const mp of (prop.electricity_meter_points || [])) {
+    const meter = (mp.meters || []).slice(-1)[0];
+    const ag = activeAgreement(mp.agreements || []);
+    if (!meter) continue;
+    if (mp.is_export) {
+      result.exp = { mpan: mp.mpan, serial: meter.serial_number, tariff: ag ? ag.tariff_code : null };
+    } else if (ag) {
+      result.elec = { mpan: mp.mpan, serial: meter.serial_number, tariff: ag.tariff_code, product: productFromTariff(ag.tariff_code), region: regionFromTariff(ag.tariff_code) };
+    }
+  }
+  for (const mp of (prop.gas_meter_points || [])) {
+    const meter = (mp.meters || []).slice(-1)[0];
+    const ag = activeAgreement(mp.agreements || []);
+    if (meter && ag) result.gas = { mprn: mp.mprn, serial: meter.serial_number, tariff: ag.tariff_code, product: productFromTariff(ag.tariff_code) };
+  }
+  return result;
+}
+
+function windowRange() {
+  const to = new Date(); to.setDate(to.getDate() + 2); // include tomorrow's Agile rates
+  const from = new Date(); from.setDate(from.getDate() - DAYS); from.setHours(0, 0, 0, 0);
+  return { from, to };
+}
+
+async function loadTariffRates(product, tariff) {
+  const { from, to } = windowRange();
+  const q = `?period_from=${from.toISOString()}&period_to=${to.toISOString()}&page_size=1500`;
+  const [unit, standing] = await Promise.all([
+    getAll(`/v1/products/${product}/electricity-tariffs/${tariff}/standard-unit-rates/${q}`, false),
+    getAll(`/v1/products/${product}/electricity-tariffs/${tariff}/standing-charges/${q}`, false),
+  ]);
+  return { unit, standing };
+}
+
+async function loadConsumption(pathBase) {
+  const { from } = windowRange();
+  const q = `?period_from=${from.toISOString()}&period_to=${new Date().toISOString()}&page_size=1500&order_by=period`;
+  return getAll(pathBase + q);
+}
+
+async function loadFinancials() {
+  return get('/financials'); // { balance, txns } assembled server-side
+}
+
+function renderBalanceSeries(fin, cutoff, ids, color) {
+  const txns = fin.txns.slice().reverse()
+    .filter(n => new Date(n.postedDate) >= cutoff && n.balanceCarriedForward != null);
+  if (!txns.length) return null;
+
+  // money out vs in, derived from balance movements (ground truth)
+  let inP = 0, outP = 0;
+  for (let i = 1; i < txns.length; i++) {
+    const d = txns[i].balanceCarriedForward - txns[i - 1].balanceCarriedForward;
+    if (d > 0) inP += d; else outP += -d;
+  }
+  const net = inP - outP;
+  const tot = document.getElementById(ids.totals);
+  if (tot) tot.innerHTML =
+    `<span class="chip out">Spent (charges) ${gbp(outP)}</span>` +
+    `<span class="chip in">Money in (payments + export) ${gbp(inP)}</span>` +
+    `<span class="chip net">Net ${net >= 0 ? '+' : '−'}${gbp(Math.abs(net))}</span>`;
+
+  const labels = txns.map(n => n.postedDate);
+  const values = txns.map(n => n.balanceCarriedForward / 100);
+  if (fin.balance != null) { labels.push(isoDate(new Date())); values.push(fin.balance / 100); }
+
+  document.getElementById(ids.panel).style.display = '';
+  destroyChart(ids.chart);
+  charts[ids.chart] = new Chart(document.getElementById(ids.chart), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: values, stepped: true, pointRadius: 2,
+        borderColor: color,
+        backgroundColor: color + '18', fill: { target: { value: 0 } },
+        segment: { borderColor: ctx => (ctx.p1.parsed.y < 0 ? '#ff3b30' : color) }
+      }]
+    },
+    options: (() => {
+      const o = baseOpts('£ balance');
+      o.plugins.tooltip = { callbacks: { label: c2 => '£' + c2.parsed.y.toFixed(2) } };
+      o.scales.x.ticks.maxTicksLimit = 14;
+      return o;
+    })()
+  });
+  return txns;
+}
+
+function renderBalanceHistory(fin) {
+  if (!fin || !fin.txns.length) return;
+  const yearAgo = new Date(); yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+  const jan1 = new Date(new Date().getFullYear(), 0, 1);
+  const txns = renderBalanceSeries(fin, yearAgo, { panel: 'balancePanel', chart: 'balanceChart', totals: 'balanceTotals' }, '#0071e3');
+  renderBalanceSeries(fin, jan1, { panel: 'balancePanelYtd', chart: 'balanceChartYtd', totals: 'balanceTotalsYtd' }, '#34c759');
+  tidyGrids();
+  if (!txns) return;
+
+  // Recent transactions table (newest first)
+  const recent = [...txns].reverse().slice(0, 15);
+  document.querySelector('#txnTable tbody').innerHTML =
+    '<tr><th>Date</th><th>Description</th><th class="num">Amount</th><th class="num">Balance</th></tr>' +
+    recent.map(n => {
+      const amt = n.amount != null
+        ? `<span class="${n.isCredit ? 'good' : 'bad'}">${n.isCredit ? '+' : '−'}${gbp(Math.abs(n.amount))}</span>` : '—';
+      return `<tr><td>${n.postedDate}</td><td>${n.title || '—'}</td><td class="num">${amt}</td><td class="num">${gbp(n.balanceCarriedForward)}</td></tr>`;
+    }).join('');
+}
+
+async function renderSolar(disc, exportConsumption) {
+  if (!exportConsumption.length) return;
+  const byDay = {};
+  for (const r of exportConsumption) {
+    const d = r.interval_start.slice(0, 10);
+    byDay[d] = (byDay[d] || 0) + r.consumption;
+  }
+  const days = Object.keys(byDay).sort();
+
+  // Earnings: reprice export against outgoing tariff rates if we have one
+  let earnByDay = null;
+  if (disc.exp && disc.exp.tariff) {
+    try {
+      const r = await loadTariffRates(productFromTariff(disc.exp.tariff), disc.exp.tariff);
+      const lookup = makeRateLookup(r.unit);
+      earnByDay = {};
+      for (const rec of exportConsumption) {
+        const d = rec.interval_start.slice(0, 10);
+        const rate = lookup(rec.interval_start);
+        if (rate) earnByDay[d] = (earnByDay[d] || 0) + rec.consumption * rate.value_inc_vat;
+      }
+    } catch (e) { earnByDay = null; }
+  }
+
+  document.getElementById('solarPanel').style.display = '';
+  destroyChart('exportChart');
+  const datasets = [{ label: 'kWh exported', data: days.map(d => byDay[d]), backgroundColor: barGrad('#ff9500'), borderRadius: 6, yAxisID: 'y' }];
+  const opts = baseOpts('kWh');
+  if (earnByDay) {
+    datasets.push({ label: '£ earned', type: 'line', data: days.map(d => (earnByDay[d] || 0) / 100), borderColor: '#34c759', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2, yAxisID: 'y2' });
+    opts.plugins.legend = { display: true, labels: { color: '#86868b' } };
+    opts.scales.y2 = { position: 'right', ticks: { color: '#34c759' }, grid: { display: false }, title: { display: true, text: '£ earned', color: '#34c759' } };
+    const total = days.reduce((s, d) => s + (earnByDay[d] || 0), 0);
+    document.getElementById('solarNote').textContent =
+      `Earned ≈ ${gbp(total)} over ${days.length} days on ${disc.exp.tariff}. Export only — self-consumed solar isn't visible to Octopus.`;
+  }
+  charts['exportChart'] = new Chart(document.getElementById('exportChart'), {
+    type: 'bar', data: { labels: days.map(d => d.slice(5)), datasets }, options: opts
+  });
+
+  tidyGrids();
+}
+
+// ---------- Cost engine ----------
+// Returns { byDay: {date: {kwh, costP}}, totalKwh, totalCostP } using exact HH rates
+function computeCosts(consumption, unitRates, standingRates) {
+  const lookup = makeRateLookup(unitRates);
+  const scLookup = makeRateLookup(standingRates);
+  const byDay = {};
+  for (const r of consumption) {
+    const d = r.interval_start.slice(0, 10);
+    if (!byDay[d]) byDay[d] = { kwh: 0, costP: 0, matched: true };
+    byDay[d].kwh += r.consumption;
+    const rate = lookup(r.interval_start);
+    if (rate) byDay[d].costP += r.consumption * rate.value_inc_vat;
+    else byDay[d].matched = false;
+  }
+  for (const d of Object.keys(byDay)) {
+    const sc = scLookup(d + 'T12:00:00Z');
+    if (sc) byDay[d].costP += sc.value_inc_vat;
+  }
+  const days = Object.keys(byDay).sort();
+  return {
+    byDay, days,
+    totalKwh: days.reduce((s, d) => s + byDay[d].kwh, 0),
+    totalCostP: days.reduce((s, d) => s + byDay[d].costP, 0)
+  };
+}
+
+// ---------- Rendering ----------
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+// Hide any .grid2 row whose panels are all hidden (avoids empty gaps)
+function tidyGrids() {
+  document.querySelectorAll('.grid2').forEach(g => {
+    const vis = [...g.children].some(c => c.style.display !== 'none');
+    g.style.display = vis ? '' : 'none';
+  });
+}
+
+function baseOpts(yLabel) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#86868b', maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }, grid: { color: 'rgba(0,0,0,0.05)' } },
+      y: { ticks: { color: '#86868b' }, grid: { color: 'rgba(0,0,0,0.05)' }, title: { display: true, text: yLabel, color: '#86868b' } }
+    }
+  };
+}
+
+function renderCostChart(costs) {
+  destroyChart('costChart');
+  charts['costChart'] = new Chart(document.getElementById('costChart'), {
+    type: 'bar',
+    data: {
+      labels: costs.days.map(d => d.slice(5)),
+      datasets: [{ data: costs.days.map(d => costs.byDay[d].costP / 100), backgroundColor: barGrad('#ff9500'), borderRadius: 6 }]
+    },
+    options: baseOpts('£ / day')
+  });
+}
+
+function renderDaily(costs) {
+  destroyChart('dailyChart');
+  charts['dailyChart'] = new Chart(document.getElementById('dailyChart'), {
+    type: 'bar',
+    data: { labels: costs.days.map(d => d.slice(5)), datasets: [{ data: costs.days.map(d => costs.byDay[d].kwh), backgroundColor: barGrad('#0071e3'), borderRadius: 6 }] },
+    options: baseOpts('kWh')
+  });
+}
+
+function heatColor(v, max) {
+  if (!max || v == null) return '#f5f5f7';
+  const stops = ['#e8e8ed', '#c7d9f7', '#8ab4f0', '#4090e8', '#0071e3'];
+  const i = Math.min(stops.length - 1, Math.floor((v / max) * stops.length));
+  return stops[i];
+}
+
+function renderHeatmap(consumption) {
+  const grid = {}; // date -> [48 slots]
+  let max = 0;
+  for (const r of consumption) {
+    const dt = new Date(r.interval_start);
+    const d = r.interval_start.slice(0, 10);
+    const slot = dt.getHours() * 2 + (dt.getMinutes() >= 30 ? 1 : 0);
+    if (!grid[d]) grid[d] = Array(48).fill(null);
+    grid[d][slot] = (grid[d][slot] || 0) + r.consumption;
+    if (grid[d][slot] > max) max = grid[d][slot];
+  }
+  const days = Object.keys(grid).sort();
+  const el = document.getElementById('heatmap');
+  el.style.gridTemplateColumns = '52px repeat(48, 1fr)';
+  let html = '<div></div>';
+  for (let s = 0; s < 48; s++) html += (s % 8 === 0) ? `<div class="hm-lab">${String(s / 2).padStart(2, '0')}:00</div>` : '<div></div>';
+  for (const d of days) {
+    html += `<div class="hm-lab">${d.slice(5)}</div>`;
+    for (let s = 0; s < 48; s++) {
+      const v = grid[d][s];
+      const time = String(Math.floor(s / 2)).padStart(2, '0') + ':' + (s % 2 ? '30' : '00');
+      html += `<div class="hm-cell" style="background:${heatColor(v, max)}" title="${d} ${time} — ${v == null ? 'no data' : fmt(v, 3) + ' kWh'}"></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderAgile(rates) {
+  const now = new Date();
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const sorted = filterPayment(rates).filter(r => new Date(r.valid_from) >= todayStart)
+    .sort((a, b) => a.valid_from.localeCompare(b.valid_from));
+  destroyChart('agileChart');
+  document.getElementById('agilePanel').style.display = '';
+  charts['agileChart'] = new Chart(document.getElementById('agileChart'), {
+    type: 'bar',
+    data: {
+      labels: sorted.map(r => r.valid_from.slice(11, 16)),
+      datasets: [{
+        data: sorted.map(r => r.value_inc_vat),
+        backgroundColor: sorted.map(r => {
+          const cur = new Date(r.valid_from) <= now && new Date(r.valid_to) > now;
+          if (cur) return '#34c759';
+          return r.value_inc_vat < 0 ? '#30b0c7' : (r.value_inc_vat > 25 ? '#ff3b30' : '#0071e3');
+        }),
+        borderRadius: 2
+      }]
+    },
+    options: baseOpts('p/kWh')
+  });
+  return sorted;
+}
+
+function cheapestWindow(future, slots) {
+  if (future.length < slots) return null;
+  let best = null;
+  for (let i = 0; i + slots <= future.length; i++) {
+    const avg = future.slice(i, i + slots).reduce((s, r) => s + r.value_inc_vat, 0) / slots;
+    if (!best || avg < best.avg) best = { avg, from: future[i].valid_from, to: future[i + slots - 1].valid_to };
+  }
+  return best;
+}
+
+function renderInsights(rates) {
+  const now = new Date();
+  const future = filterPayment(rates).filter(r => new Date(r.valid_from) > now)
+    .sort((a, b) => a.valid_from.localeCompare(b.valid_from));
+  const rows = [];
+  const t = s => new Date(s).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  if (future.length) {
+    const cheapest = future.reduce((a, b) => a.value_inc_vat < b.value_inc_vat ? a : b);
+    const dearest = future.reduce((a, b) => a.value_inc_vat > b.value_inc_vat ? a : b);
+    rows.push(['Cheapest upcoming slot', `<span class="good">${fmt(cheapest.value_inc_vat)}p</span> at ${t(cheapest.valid_from)}`]);
+    rows.push(['Most expensive slot', `<span class="bad">${fmt(dearest.value_inc_vat)}p</span> at ${t(dearest.valid_from)}`]);
+    const w2 = cheapestWindow(future, 4), w3 = cheapestWindow(future, 6);
+    if (w2) rows.push(['Best 2-hour window', `<span class="good">${fmt(w2.avg)}p avg</span> from ${t(w2.from)}`]);
+    if (w3) rows.push(['Best 3-hour window', `<span class="good">${fmt(w3.avg)}p avg</span> from ${t(w3.from)}`]);
+    const avg = future.reduce((s, r) => s + r.value_inc_vat, 0) / future.length;
+    rows.push(['Average of published future rates', fmt(avg) + 'p/kWh']);
+    const negs = future.filter(r => r.value_inc_vat < 0);
+    if (negs.length) rows.push(['Negative price slots (get paid!)', `<span class="good">${negs.length} upcoming</span>`]);
+    const tomorrowPublished = future.some(r => r.valid_from.slice(0, 10) > isoDate(now));
+    rows.push(["Tomorrow's rates", tomorrowPublished ? 'Published ✓' : 'Not yet (usually ~16:00)']);
+  } else {
+    rows.push(['Upcoming rates', 'None published yet']);
+  }
+  document.getElementById('insightsPanel').style.display = '';
+  document.querySelector('#insightsTable tbody').innerHTML =
+    rows.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join('');
+}
+
+async function renderComparison(disc, consumption, costs) {
+  // Reprice the same usage on Flexible Octopus (and Agile if not already on it)
+  const region = disc.elec.region;
+  const candidates = [{ label: 'Flexible Octopus', product: 'VAR-22-11-01' }];
+  if (!disc.elec.product.startsWith('AGILE')) candidates.push({ label: 'Agile Octopus', product: 'AGILE-24-10-01' });
+
+  const rows = [[`${disc.elec.product} <span style="color:var(--muted)">(current)</span>`,
+    costs.totalCostP, costs.totalKwh ? costs.totalCostP / costs.totalKwh : null, null]];
+
+  for (const c of candidates) {
+    try {
+      const tariff = `E-1R-${c.product}-${region}`;
+      const r = await loadTariffRates(c.product, tariff);
+      const alt = computeCosts(consumption, r.unit, r.standing);
+      rows.push([c.label, alt.totalCostP, alt.totalKwh ? alt.totalCostP / alt.totalKwh : null, alt.totalCostP - costs.totalCostP]);
+    } catch (e) { /* product may not exist in region */ }
+  }
+  if (rows.length < 2) return;
+  document.getElementById('comparePanel').style.display = '';
+  document.querySelector('#compareTable tbody').innerHTML =
+    '<tr><th>Tariff</th><th class="num">14-day cost</th><th class="num">effective p/kWh</th><th class="num">vs current</th></tr>' +
+    rows.map(r => {
+      const diff = r[3];
+      const diffTxt = diff == null ? '—' : (diff <= 0 ? `<span class="good">${gbp(diff)}</span>` : `<span class="bad">+${gbp(diff)}</span>`);
+      return `<tr><td>${r[0]}</td><td class="num">${gbp(r[1])}</td><td class="num">${fmt(r[2], 1)}</td><td class="num">${diffTxt}</td></tr>`;
+    }).join('');
+  tidyGrids();
+  document.getElementById('compareNote').textContent =
+    'Effective p/kWh includes standing charges. Repriced with each tariff’s actual half-hourly/period rates for region ' + region + '.';
+}
+
+function renderPattern(consumption, costs) {
+  const bySlot = Array(48).fill(0), slotCount = Array(48).fill(0);
+  let weekday = 0, weekdayDays = 0, weekend = 0, weekendDays = 0;
+  const dayTotals = {};
+  for (const r of consumption) {
+    const dt = new Date(r.interval_start);
+    const slot = dt.getHours() * 2 + (dt.getMinutes() >= 30 ? 1 : 0);
+    bySlot[slot] += r.consumption; slotCount[slot]++;
+    const d = r.interval_start.slice(0, 10);
+    dayTotals[d] = (dayTotals[d] || 0) + r.consumption;
+  }
+  for (const d of Object.keys(dayTotals)) {
+    const dow = new Date(d + 'T12:00:00Z').getUTCDay();
+    if (dow === 0 || dow === 6) { weekend += dayTotals[d]; weekendDays++; }
+    else { weekday += dayTotals[d]; weekdayDays++; }
+  }
+  let peakSlot = 0;
+  for (let s = 0; s < 48; s++) if (slotCount[s] && bySlot[s] / slotCount[s] > (slotCount[peakSlot] ? bySlot[peakSlot] / slotCount[peakSlot] : 0)) peakSlot = s;
+  const slotTime = s => String(Math.floor(s / 2)).padStart(2, '0') + ':' + (s % 2 ? '30' : '00');
+  const nightKwh = bySlot.slice(0, 12).reduce((a, b) => a + b, 0); // 00:00-06:00
+  const total = bySlot.reduce((a, b) => a + b, 0);
+
+  const rows = [
+    ['Average daily usage', fmt(costs.totalKwh / Math.max(1, costs.days.length), 1) + ' kWh'],
+    ['Average daily cost', gbp(costs.totalCostP / Math.max(1, costs.days.length))],
+    ['Weekday avg', weekdayDays ? fmt(weekday / weekdayDays, 1) + ' kWh' : '–'],
+    ['Weekend avg', weekendDays ? fmt(weekend / weekendDays, 1) + ' kWh' : '–'],
+    ['Peak usage time', slotTime(peakSlot) + '–' + slotTime((peakSlot + 1) % 48)],
+    ['Overnight share (00:00–06:00)', total ? fmt(100 * nightKwh / total, 0) + '%' : '–'],
+  ];
+  document.querySelector('#patternTable tbody').innerHTML =
+    rows.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join('');
+}
+
+function currentRate(rates) {
+  const now = new Date();
+  return filterPayment(rates).find(r => new Date(r.valid_from) <= now && (!r.valid_to || new Date(r.valid_to) > now));
+}
+
+function renderAccountTable(disc, rates) {
+  const rows = [];
+  rows.push(['Account', disc.number || '—']);
+  if (disc.prop) rows.push(['Property', [disc.prop.address_line_1, disc.prop.town, disc.prop.postcode].filter(Boolean).join(', ')]);
+  if (disc.elec) {
+    rows.push(['Electricity tariff', disc.elec.tariff]);
+    rows.push(['MPAN / serial', disc.elec.mpan + ' / ' + disc.elec.serial]);
+    rows.push(['Region (GSP)', disc.elec.region]);
+  }
+  if (disc.exp) rows.push(['Export MPAN', disc.exp.mpan + (disc.exp.tariff ? ' (' + disc.exp.tariff + ')' : '')]);
+  if (disc.gas) {
+    rows.push(['Gas tariff', disc.gas.tariff]);
+    rows.push(['MPRN / serial', disc.gas.mprn + ' / ' + disc.gas.serial]);
+  }
+  const cur = currentRate(rates.unit);
+  if (cur && cur.valid_to) rows.push(['Current rate window', cur.valid_from.slice(11, 16) + ' – ' + cur.valid_to.slice(11, 16) + ' UTC']);
+  document.querySelector('#acctTable tbody').innerHTML =
+    rows.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join('');
+}
+
+// ---------- Live telemetry (Home Mini) ----------
+async function updateLive() {
+  try {
+    const d = await get('/live');
+    if (!d.available || !(d.readings || []).length) return; // no Home Mini — stay hidden
+    const rs = d.readings.map(r => ({ t: String(r.readAt), w: Number(r.demand) })).filter(r => !isNaN(r.w));
+    if (!rs.length) return;
+    const cur = rs[rs.length - 1].w;
+
+    document.getElementById('liveCard').style.display = '';
+    const el = document.getElementById('livePower');
+    const abs = Math.abs(cur);
+    el.innerHTML = abs >= 1000 ? fmt(abs / 1000, 2) + ' <span class="unit">kW</span>' : Math.round(abs) + ' <span class="unit">W</span>';
+    el.className = 'value ' + (cur < 0 ? 'pos' : '');
+    document.getElementById('liveSub').textContent = cur < 0 ? 'exporting to grid · live' : 'drawing from grid · live';
+
+    document.getElementById('livePanel').style.display = '';
+    tidyGrids();
+    destroyChart('liveChart');
+    charts['liveChart'] = new Chart(document.getElementById('liveChart'), {
+      type: 'line',
+      data: {
+        labels: rs.map(r => r.t.slice(11, 16)),
+        datasets: [{
+          data: rs.map(r => r.w), pointRadius: 0, tension: 0.3, fill: { target: { value: 0 } },
+          borderColor: '#0071e3', backgroundColor: 'rgba(0,113,227,0.08)',
+          segment: { borderColor: ctx => (ctx.p1.parsed.y < 0 ? '#34c759' : '#0071e3') }
+        }]
+      },
+      options: (() => { const o = baseOpts('watts (negative = export)'); o.animation = false; return o; })()
+    });
+  } catch (e) { /* keep hidden on failure */ }
+}
+
+// ---------- Main refresh ----------
+async function refreshAll() {
+  banner(null);
+  setStatus(false, 'Loading…');
+  try {
+    const disc = await discoverAccount();
+    if (!disc.elec) throw new Error('No import electricity meter point found on this account.');
+    const isAgile = disc.elec.product.startsWith('AGILE');
+
+    const [rates, consumption, gasConsumption, exportConsumption, fin] = await Promise.all([
+      loadTariffRates(disc.elec.product, disc.elec.tariff),
+      loadConsumption(`/v1/electricity-meter-points/${disc.elec.mpan}/meters/${disc.elec.serial}/consumption/`),
+      disc.gas ? loadConsumption(`/v1/gas-meter-points/${disc.gas.mprn}/meters/${disc.gas.serial}/consumption/`).catch(() => []) : Promise.resolve([]),
+      disc.exp ? loadConsumption(`/v1/electricity-meter-points/${disc.exp.mpan}/meters/${disc.exp.serial}/consumption/`).catch(() => []) : Promise.resolve([]),
+      loadFinancials().catch(() => null)
+    ]);
+    const balance = fin ? fin.balance : null;
+
+    // Exact costs
+    const costs = computeCosts(consumption, rates.unit, rates.standing);
+
+    // Cards
+    if (balance != null) {
+      const el = document.getElementById('balance');
+      el.textContent = gbp(Math.abs(balance)) + (balance >= 0 ? ' CR' : ' DR');
+      el.className = 'value ' + (balance >= 0 ? 'pos' : 'neg');
+      document.getElementById('balanceCard').style.display = '';
+    }
+    const cur = currentRate(rates.unit);
+    document.getElementById('curRate').innerHTML = cur ? fmt(cur.value_inc_vat) + ' <span class="unit">p/kWh</span>' : '–';
+    document.getElementById('curRateSub').textContent = disc.elec.product + (isAgile ? ' (half-hourly pricing)' : '');
+    const sc = currentRate(rates.standing);
+    document.getElementById('standCharge').innerHTML = sc ? fmt(sc.value_inc_vat) + ' <span class="unit">p</span>' : '–';
+    renderGauge(rates.unit);
+
+    const last7 = costs.days.slice(-7);
+    const wk = last7.reduce((a, d) => ({ kwh: a.kwh + costs.byDay[d].kwh, p: a.p + costs.byDay[d].costP }), { kwh: 0, p: 0 });
+    document.getElementById('weekCost').textContent = gbp(wk.p);
+    document.getElementById('weekUsage').textContent = fmt(wk.kwh, 1) + ' kWh · exact half-hourly pricing';
+
+    const yd = isoDate(new Date(Date.now() - 864e5));
+    if (costs.byDay[yd]) {
+      document.getElementById('yesterdayCost').textContent = gbp(costs.byDay[yd].costP);
+      document.getElementById('yesterdayUsage').textContent = fmt(costs.byDay[yd].kwh, 1) + ' kWh';
+    } else {
+      document.getElementById('yesterdayCost').textContent = 'no data';
+      document.getElementById('yesterdayUsage').textContent = 'smart meter data lags ~24h';
+    }
+
+    // Charts & panels
+    renderCostChart(costs);
+    renderDaily(costs);
+    renderHeatmap(consumption);
+    if (isAgile) { renderAgile(rates.unit); renderInsights(rates.unit); }
+    else { document.getElementById('agilePanel').style.display = 'none'; document.getElementById('insightsPanel').style.display = 'none'; }
+    renderAccountTable(disc, rates);
+    renderPattern(consumption, costs);
+    renderComparison(disc, consumption, costs); // async, fills in when done
+    if (fin) renderBalanceHistory(fin);
+    renderSolar(disc, exportConsumption); // async, fills in when done
+
+    // Gas
+    if (gasConsumption.length) {
+      document.getElementById('gasCard').style.display = '';
+      const gasByDay = {};
+      for (const r of gasConsumption) {
+        const d = r.interval_start.slice(0, 10);
+        gasByDay[d] = (gasByDay[d] || 0) + r.consumption;
+      }
+      const gDays = Object.keys(gasByDay).sort().slice(-7);
+      const gWeek = gDays.reduce((s, d) => s + gasByDay[d], 0);
+      document.getElementById('gasWeekUsage').innerHTML = fmt(gWeek, 1) + ' <span class="unit">kWh/m³</span>';
+    }
+    // Export
+    if (exportConsumption.length) {
+      document.getElementById('exportCard').style.display = '';
+      const eByDay = {};
+      for (const r of exportConsumption) {
+        const d = r.interval_start.slice(0, 10);
+        eByDay[d] = (eByDay[d] || 0) + r.consumption;
+      }
+      const eDays = Object.keys(eByDay).sort().slice(-7);
+      const eWeek = eDays.reduce((s, d) => s + eByDay[d], 0);
+      document.getElementById('exportWeek').innerHTML = fmt(eWeek, 1) + ' <span class="unit">kWh</span>';
+    }
+
+    tidyGrids();
+    window._lastRefresh = Date.now();
+    setStatus(true, 'Connected');
+    document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    setStatus(false, 'Error');
+    banner('Failed to load data: ' + e.message + (String(e.message).includes('401') ? ' — check the OCTOPUS_API_KEY secret on the server.' : ''));
+  }
+}
+
+// ---------- Init ----------
+window.addEventListener('load', () => {
+  refreshAll();
+  updateLive();
+  setInterval(() => { if (!document.hidden) refreshAll(); }, 15 * 60 * 1000);
+  setInterval(() => { if (!document.hidden) updateLive(); }, 30 * 1000);
+  // catch up as soon as the tab becomes visible again
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && Date.now() - (window._lastRefresh || 0) > 15 * 60 * 1000) refreshAll();
+  });
+});
+</script>
+</body>
+</html>
