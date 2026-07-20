@@ -782,6 +782,11 @@ async function pollCycle(env, state, opts = {}) {
   // home integrations (tado / vaillant / eero) every 5 min
   if (now - (state.lastHome || 0) > 300 || opts.force) {
     state.lastHome = now;
+    // heat pump energy report data, hourly
+    if (now - (state.lastVailEnergy || 0) > 3600) {
+      state.lastVailEnergy = now;
+      try { await fetchVaillantEnergy(env, state, log); } catch (e) { log.push("vail energy: " + String(e).slice(0, 80)); }
+    }
     await refreshHome(env, state, log);
   }
   if (env.OCTOPUS_API_KEY && (!state.octopus || !state.octoDeepFill || now - (state.lastOcto || 0) > 1800 || opts.force)) {
@@ -876,6 +881,30 @@ async function runCommand(env, state, command, value) {
     });
     if (!r.ok) throw new Error(`tado set ${r.status}: ${(await r.text()).slice(0, 100)}`);
     log.push(`tado zone ${zid} -> ${temp}° (until schedule change)`);
+  } else if (command === "tado_set_all" || command === "tado_resume_all") {
+    const tok = await tadoToken(env, state);
+    const zr = await fetch(`https://my.tado.com/api/v2/homes/${state.tadoHome}/zones`, { headers: { Authorization: `Bearer ${tok}` } });
+    const zones = (await zr.json()).filter((z) => z.type === "HEATING");
+    let n = 0;
+    for (const z of zones) {
+      const url = `https://my.tado.com/api/v2/homes/${state.tadoHome}/zones/${z.id}/overlay`;
+      const r = command === "tado_set_all"
+        ? await fetch(url, { method: "PUT", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ setting: { type: "HEATING", power: "ON", temperature: { celsius: parseFloat(value) } }, termination: { type: "TADO_MODE" } }) })
+        : await fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${tok}` } });
+      if (r.ok || r.status === 204) n++;
+    }
+    log.push(command === "tado_set_all" ? `all rooms -> ${value}° (${n}/${zones.length})` : `all rooms -> schedule (${n}/${zones.length})`);
+  } else if (command === "eero_pause") {
+    const [durl, on] = String(value).split("|");
+    const path = durl.replace(/^\/2\.2\//, "");
+    const r = await fetch(`https://api-user.e2ro.com/2.2/${path}`, {
+      method: "PUT", headers: { Cookie: `s=${state.eeroTok}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ paused: on === "on" }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if ((((j || {}).meta || {}).code) !== 200) throw new Error(`eero pause ${JSON.stringify((j || {}).meta).slice(0, 80)}`);
+    log.push(`device ${on === "on" ? "paused" : "resumed"}`);
   } else if (command === "tado_resume") {
     const tok = await tadoToken(env, state);
     const r = await fetch(`https://my.tado.com/api/v2/homes/${state.tadoHome}/zones/${value}/overlay`, {
@@ -1135,6 +1164,12 @@ async function fetchVaillant(env, state) {
   const dhw = ((st.domesticHotWater || [])[0]) || {};
   const dhwCfg = ((cfg.domesticHotWater || [])[0]) || {};
   const circuit = ((st.circuits || [])[0]) || {};
+  // live power draw per device (mpc = my power consumption)
+  let power = null;
+  try {
+    const mpc = await get(`${VAILLANT_API}/hem/${state.vaillantSys}/mpc`);
+    power = ((mpc || {}).devices || []).reduce((a, d) => a + (d.currentPower ?? d.current_power ?? 0), 0);
+  } catch (e) {}
   return {
     t: localOffsetISO().slice(0, 19),
     outdoor: sState.outdoorTemperature,
@@ -1142,8 +1177,43 @@ async function fetchVaillant(env, state) {
     flowTemp: sState.systemFlowTemperature ?? circuit.currentCircuitFlowTemperature,
     dhwTemp: dhw.currentDhwTemperature,
     dhwTarget: dhwCfg.tappingSetpoint,
+    power,
     zones,
+    energyDaily: ((state.vailEnergy || {}).daily) || [],
   };
+}
+// hourly: pull daily electrical-consumption buckets for the energy report
+async function fetchVaillantEnergy(env, state, log) {
+  if (!env.MYVAILLANT_EMAIL || !state.vaillantSys) return;
+  const tok = await vaillantToken(env, state);
+  const vh = { Authorization: `Bearer ${tok}`, "x-app-identifier": "VAILLANT", "Accept-Language": "en-GB", "Accept": "application/json, text/plain, */*", "x-client-locale": "en-GB", "x-idm-identifier": "KEYCLOAK", "ocp-apim-subscription-key": "1e0a2f3511fb4c5bbb1c7f9fedd20b1c", "User-Agent": "okhttp/4.9.2" };
+  const get = async (u) => { const r = await fetch(u, { headers: vh }); if (!r.ok) throw new Error(`vaillant emf ${r.status}`); return r.json(); };
+  const cs = await get(`${VAILLANT_API}/emf/v2/${state.vaillantSys}/currentSystem`);
+  const byDay = {};
+  const start = new Date(Date.now() - 395 * 864e5).toISOString();
+  const end = new Date().toISOString();
+  for (const dev of (cs || {}).devices || (Array.isArray(cs) ? cs : []) || []) {
+    for (const d of dev.data || []) {
+      const et = d.valueType || d.energyType || d.value_type;
+      if (et !== "CONSUMED_ELECTRICAL_ENERGY") continue;
+      const om = d.operationMode || d.operation_mode;
+      const from = (d.from && d.from > start) ? d.from : start;
+      const q = new URLSearchParams({ resolution: "DAY", operationMode: om, energyType: et, startDate: from, endDate: end });
+      try {
+        const b = await get(`${VAILLANT_API}/emf/v2/${state.vaillantSys}/devices/${dev.deviceUuid || dev.device_uuid}/buckets?${q}`);
+        for (const row of (b || {}).data || []) {
+          const day = (row.startDate || row.start_date || "").slice(0, 10);
+          if (!day) continue;
+          const o = (byDay[day] = byDay[day] || { d: day, kwh: 0, dhw: 0 });
+          const kwh = (row.value || 0) / 1000; // Wh → kWh
+          o.kwh += kwh;
+          if (om === "DOMESTIC_HOT_WATER") o.dhw += kwh;
+        }
+      } catch (e) {}
+    }
+  }
+  const daily = Object.keys(byDay).sort().map((k) => ({ d: byDay[k].d, kwh: Math.round(byDay[k].kwh * 100) / 100, dhw: Math.round(byDay[k].dhw * 100) / 100 }));
+  if (daily.length) state.vailEnergy = { daily, t: Date.now() / 1000 };
 }
 
 async function fetchEero(env, state) {
@@ -1184,6 +1254,7 @@ async function fetchEero(env, state) {
     devices: conn.slice(0, 60).map((d) => ({
       name: d.nickname || d.hostname || d.manufacturer || "unknown",
       ip: d.ip, wireless: d.wireless, band: (d.connectivity || {}).frequency || null,
+      url: d.url || null, paused: !!d.paused,
     })),
   };
 }
