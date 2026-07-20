@@ -494,7 +494,7 @@ async function vaillantSetDhw(env, state, temp) {
   const tok = await vaillantToken(env, state);
   const base = (state.vaillantCtrl === "vrc700" ? VAILLANT_API.replace("end-user-app-api/v1", "vrc700/v1") : VAILLANT_API)
     + `/systems/${state.vaillantSys}/${state.vaillantCtrl || "tli"}`;
-  const r = await fetch(`${base}/domestic-hot-water/0/temperature`, {
+  const r = await fetch(`${base}/domestic-hot-water/${state.vaillantDhwIdx ?? 255}/temperature`, {
     method: "PATCH",
     headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json", "x-app-identifier": "VAILLANT", "Accept-Language": "en-GB", "x-client-locale": "en-GB", "x-idm-identifier": "KEYCLOAK", "ocp-apim-subscription-key": "1e0a2f3511fb4c5bbb1c7f9fedd20b1c", "User-Agent": "okhttp/4.9.2" },
     body: JSON.stringify({ setpoint: Math.round(temp) }),
@@ -505,7 +505,7 @@ async function vaillantDhwBoost(env, state, on) {
   const tok = await vaillantToken(env, state);
   const base = (state.vaillantCtrl === "vrc700" ? VAILLANT_API.replace("end-user-app-api/v1", "vrc700/v1") : VAILLANT_API)
     + `/systems/${state.vaillantSys}/${state.vaillantCtrl || "tli"}`;
-  const r = await fetch(`${base}/domestic-hot-water/0/boost`, {
+  const r = await fetch(`${base}/domestic-hot-water/${state.vaillantDhwIdx ?? 255}/boost`, {
     method: on ? "POST" : "DELETE",
     headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json", "x-app-identifier": "VAILLANT", "Accept-Language": "en-GB", "x-client-locale": "en-GB", "x-idm-identifier": "KEYCLOAK", "ocp-apim-subscription-key": "1e0a2f3511fb4c5bbb1c7f9fedd20b1c", "User-Agent": "okhttp/4.9.2" },
     body: on ? "{}" : undefined,
@@ -1009,10 +1009,11 @@ async function runCommand(env, state, command, value) {
       if (!r.ok && r.status !== 204) throw new Error(`vaillant ${path} ${r.status}: ${(await r.text()).slice(0, 100)}`);
     };
     if (command === "vaillant_dhw_boost") {
-      if (value === "on") { await vreq("POST", "/domestic-hot-water/0/boost", {}); log.push("hot water boost started"); }
-      else { await vreq("DELETE", "/domestic-hot-water/0/boost"); log.push("hot water boost cancelled"); }
+      const dIdx = state.vaillantDhwIdx ?? 255;
+      if (value === "on") { await vreq("POST", `/domestic-hot-water/${dIdx}/boost`, {}); log.push("hot water boost started"); }
+      else { await vreq("DELETE", `/domestic-hot-water/${dIdx}/boost`); log.push("hot water boost cancelled"); }
     } else if (command === "vaillant_dhw_temp") {
-      await vreq("PATCH", "/domestic-hot-water/0/temperature", { setpoint: Math.round(parseFloat(value)) });
+      await vreq("PATCH", `/domestic-hot-water/${state.vaillantDhwIdx ?? 255}/temperature`, { setpoint: Math.round(parseFloat(value)) });
       log.push(`hot water target -> ${Math.round(parseFloat(value))}°`);
     } else if (command === "vaillant_veto") {
       const [idx, temp] = String(value).split("|");
@@ -1255,6 +1256,7 @@ async function fetchVaillant(env, state) {
     humidity: z.currentRoomHumidity,
   }));
   const dhw = ((st.domesticHotWater || [])[0]) || {};
+  if (dhw.index != null) state.vaillantDhwIdx = dhw.index;
   const dhwCfg = ((cfg.domesticHotWater || [])[0]) || {};
   const circuit = ((st.circuits || [])[0]) || {};
   // live power draw per device (mpc = my power consumption)
