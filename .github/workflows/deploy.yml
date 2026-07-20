@@ -60,4 +60,7 @@ jobs:
             put MYVAILLANT_EMAIL    "${{ secrets.MYVAILLANT_EMAIL }}"
             put MYVAILLANT_PASSWORD "${{ secrets.MYVAILLANT_PASSWORD }}"
           fi
+          if [ -n "${{ secrets.OURA_TOKEN }}" ]; then
+            put OURA_TOKEN          "${{ secrets.OURA_TOKEN }}"
+          fi
           rm -f rt.txt salt.b64 key.b64
