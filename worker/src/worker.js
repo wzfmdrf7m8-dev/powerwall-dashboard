@@ -1393,12 +1393,13 @@ async function refreshHome(env, state, log) {
   // overnight bedroom temperature sampling (22:00-09:00) for the sleep correlation
   try {
     const rooms = ((home.tado || {}).rooms) || [];
-    const bed = rooms.find((r) => /bed/i.test(r.name || ""));
+    const bed = rooms.find((r) => /main\s*bed|master/i.test(r.name || "")) || rooms.find((r) => /bed/i.test(r.name || ""));
     if (bed && bed.temp != null) {
       const hr = parseInt(hhmm().slice(0, 2), 10);
       if (hr >= 22 || hr < 9) {
         const dKey = hr >= 22 ? londonDayEndISO(new Date(Date.now() + 864e5)).slice(0, 10) : localMinuteISO().slice(0, 10);
         const B = (state.bedNights = state.bedNights || {});
+        if (B[dKey] && B[dKey].room !== bed.name) delete B[dKey]; // room choice changed — restart tonight's record
         const rec = (B[dKey] = B[dKey] || { sum: 0, n: 0, min: 99, max: -99, room: bed.name });
         rec.sum += bed.temp; rec.n++;
         rec.min = Math.min(rec.min, bed.temp); rec.max = Math.max(rec.max, bed.temp);
