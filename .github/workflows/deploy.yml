@@ -56,4 +56,8 @@ jobs:
           put OCTOPUS_ACCOUNT       "${{ secrets.OCTOPUS_ACCOUNT }}"
           put OHME_EMAIL            "${{ secrets.OHME_EMAIL }}"
           put OHME_PASSWORD         "${{ secrets.OHME_PASSWORD }}"
+          if [ -n "${{ secrets.MYVAILLANT_EMAIL }}" ]; then
+            put MYVAILLANT_EMAIL    "${{ secrets.MYVAILLANT_EMAIL }}"
+            put MYVAILLANT_PASSWORD "${{ secrets.MYVAILLANT_PASSWORD }}"
+          fi
           rm -f rt.txt salt.b64 key.b64
