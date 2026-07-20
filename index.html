@@ -40,6 +40,9 @@
   .socbar{display:inline-block;width:44px;height:10px;border-radius:5px;background:#e5e5ea;overflow:hidden;vertical-align:middle}
   .socbar i{display:block;height:100%;background:linear-gradient(90deg,#34c759,#30d158);border-radius:5px}
   html,body{overflow-x:hidden;max-width:100vw}
+  nav.pages{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  nav.pages a{text-decoration:none;color:var(--txt);background:#fff;border:1px solid #e5e5ea;border-radius:99px;padding:6px 16px;font-size:13px;font-weight:600}
+  nav.pages a.on{background:#1d1d1f;color:#fff;border-color:#1d1d1f}
   svg,canvas,img{max-width:100%}
   select,input{max-width:100%}
   .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
@@ -79,6 +82,9 @@
 </style>
 </head>
 <body>
+<nav class="pages">
+  <a class="on" href="./">⚡ Energy</a><a href="heating">🌡 Heating</a><a href="boiler">🔥 Boiler</a><a href="network">📶 Network</a>
+</nav>
 <div id="overlay"><div class="box">
   <h1 style="margin-bottom:14px">&#9889; Powerwall</h1>
   <input id="pw" type="password" placeholder="Dashboard password" style="width:100%" autofocus>
@@ -123,6 +129,9 @@
   <div class="row">
     <button onclick="cmd('follow_ohme','on')">Charge Powerwall during Ohme slots: ON</button>
     <button class="sec" onclick="cmd('follow_ohme','off')">OFF</button>
+    <button class="sec" onclick="cmd('tado_auth','')">Connect tado</button>
+    <input id="eeroEmail" type="email" placeholder="eero account email" style="width:180px"><button class="sec" onclick="cmd('eero_login',val('eeroEmail'))">Connect eero</button>
+    <input id="eeroCode" placeholder="eero code" style="width:100px"><button class="sec" onclick="cmd('eero_verify',val('eeroCode'))">Verify</button>
     <input id="pat" type="password" placeholder="GitHub token (stored in this browser only)" style="flex:1;min-width:220px"><button class="sec" onclick="savePat()">Save token</button>
   </div>
   <div class="err" id="cmderr"></div>
