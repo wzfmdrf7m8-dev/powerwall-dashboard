@@ -539,10 +539,13 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     else { await setReserve(day.reserve ?? 0, "outside ohme slots"); await setGridCharging(!!day.allow_grid_charging, "outside ohme slots"); }
   }
   // heat the hot water tank to 65° during Ohme off-peak slots, restore after
+  if (!(cfg.dhw_ohme_slots && env.MYVAILLANT_EMAIL && state.vaillantSys))
+    console.log(`dhw gate closed: cfg=${!!cfg.dhw_ohme_slots} vailEnv=${!!env.MYVAILLANT_EMAIL} sys=${!!state.vaillantSys}`);
   if (cfg.dhw_ohme_slots && env.MYVAILLANT_EMAIL && state.vaillantSys) {
     const ohmeOk2 = state.ohmeData && !state.ohmeData.error;
     const nowIso2 = new Date().toISOString();
     const inSlot2 = ohmeOk2 && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso2 && nowIso2 < sl.end);
+    console.log(`dhw: ohmeOk=${!!ohmeOk2} slots=${JSON.stringify((state.ohmeData || {}).slots || [])} now=${nowIso2} inSlot=${!!inSlot2} boosted=${state.dhwBoosted || 0}`);
     try {
       if (inSlot2 && !state.dhwBoosted) {
         const cur = (((state.home || {}).vaillant) || {}).dhwTarget ?? 50;
