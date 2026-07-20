@@ -1432,6 +1432,73 @@ export default {
         headers: { ...CORS, "Content-Type": "text/plain", "Cache-Control": "no-store" },
       });
     }
+    // Octopus dashboard proxy (ported from the randle-energy Pages functions).
+    // The API key and account number stay server-side; gated by the dashboard password.
+    if (url.pathname.startsWith("/octo")) {
+      const oj = (obj, status = 200) => new Response(JSON.stringify(obj),
+        { status, headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "private, no-store" } });
+      if (request.headers.get("x-auth") !== env.DASH_PASSWORD) return oj({ error: "unauthorized" }, 401);
+      if (request.method !== "GET") return oj({ error: "Method not allowed" }, 405);
+      if (!env.OCTOPUS_API_KEY || !env.OCTOPUS_ACCOUNT) return oj({ error: "Server not configured: set OCTOPUS_API_KEY and OCTOPUS_ACCOUNT secrets." }, 500);
+      const path = url.pathname.replace(/^\/octo/, "");
+      const OCTO = "https://api.octopus.energy";
+      const oauth = { Authorization: "Basic " + btoa(env.OCTOPUS_API_KEY + ":") };
+      const ogql = async (query, variables, token) => {
+        const headers = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = token;
+        const res = await fetch(OCTO + "/v1/graphql/", { method: "POST", headers, body: JSON.stringify({ query, variables }) });
+        const data = await res.json();
+        if (data.errors) throw new Error(data.errors[0].message);
+        return data.data;
+      };
+      const kraken = async () => (await ogql("mutation($key:String!){obtainKrakenToken(input:{APIKey:$key}){token}}", { key: env.OCTOPUS_API_KEY }, null)).obtainKrakenToken.token;
+      try {
+        if (path === "/account") {
+          const r = await fetch(`${OCTO}/v1/accounts/${env.OCTOPUS_ACCOUNT}/`, { headers: oauth });
+          const body = await r.json();
+          if (r.ok) body.number = env.OCTOPUS_ACCOUNT;
+          return oj(body, r.status);
+        }
+        if (path === "/financials") {
+          const token = await kraken();
+          const d = await ogql("query($a:String!){account(accountNumber:$a){balance}}", { a: env.OCTOPUS_ACCOUNT }, token);
+          const out = { balance: d.account.balance, txns: [] };
+          const queries = [
+            "query($a:String!){account(accountNumber:$a){transactions(first:250){edges{node{postedDate title amount balanceCarriedForward isCredit}}}}}",
+            "query($a:String!){account(accountNumber:$a){transactions(first:250){edges{node{postedDate balanceCarriedForward}}}}}",
+          ];
+          for (const q of queries) {
+            try {
+              const r = await ogql(q, { a: env.OCTOPUS_ACCOUNT }, token);
+              out.txns = (r.account.transactions.edges || []).map((e) => e.node).filter((n) => n && n.postedDate);
+              break;
+            } catch (e) { /* try next shape */ }
+          }
+          return oj(out);
+        }
+        if (path === "/live") {
+          try {
+            const token = await kraken();
+            const d = await ogql("query($a:String!){account(accountNumber:$a){electricityAgreements(active:true){meterPoint{meters{smartDevices{deviceId}}}}}}", { a: env.OCTOPUS_ACCOUNT }, token);
+            let deviceId = null;
+            for (const ag of (d.account.electricityAgreements || []))
+              for (const m of (((ag.meterPoint || {}).meters) || []))
+                for (const sd of (m.smartDevices || []))
+                  if (sd.deviceId && !deviceId) deviceId = sd.deviceId;
+            if (!deviceId) return oj({ available: false, reason: "no Home Mini device found" });
+            const end = new Date(), start = new Date(end.getTime() - 30 * 60 * 1000);
+            const q = `query { smartMeterTelemetry(deviceId: "${deviceId}", grouping: ONE_MINUTE, start: "${start.toISOString()}", end: "${end.toISOString()}") { readAt demand consumptionDelta costDelta } }`;
+            const tel = await ogql(q, {}, token);
+            return oj({ available: true, readings: tel.smartMeterTelemetry || [] });
+          } catch (e) { return oj({ available: false, reason: String(e.message || e) }); }
+        }
+        if (path.startsWith("/v1/") && !path.includes("graphql")) {
+          const r = await fetch(OCTO + path + url.search, { headers: oauth });
+          return new Response(r.body, { status: r.status, headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "private, no-store" } });
+        }
+        return oj({ error: "Not found" }, 404);
+      } catch (e) { return oj({ error: String(e.message || e) }, 502); }
+    }
     if (url.pathname === "/health") {
       // gated: only returns detail to an authenticated caller
       if (request.headers.get("x-auth") !== env.DASH_PASSWORD)
