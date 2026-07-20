@@ -822,6 +822,23 @@ async function pollCycle(env, state, opts = {}) {
     if (now - (state.lastOura || 0) > 3600 || opts.force) {
       state.lastOura = now;
       try { state.oura = await fetchOura(env); } catch (e) { log.push("oura: " + String(e).slice(0, 80)); }
+      // pair each synced night with the sampled bedroom temperature
+      try {
+        const o = state.oura || {};
+        if (o.nights && o.nights.length) {
+          const SL = (state.sleepLog = state.sleepLog || []);
+          const have = new Set(SL.map((x) => x.d));
+          for (const n of o.nights) {
+            const b = ((state.bedNights || {})[n.day]);
+            if (!b || !b.n || have.has(n.day)) continue;
+            const sc = (o.sleep || []).find((s) => s.day === n.day) || {};
+            SL.push({ d: n.day, temp: Math.round(10 * b.sum / b.n) / 10, tmin: b.min, tmax: b.max, room: b.room,
+              score: sc.score ?? null, deep: n.deep, rem: n.rem, dur: n.dur, eff: n.eff, hrv: n.hrv, lhr: n.lhr });
+          }
+          SL.sort((a, b) => (a.d < b.d ? -1 : 1));
+          if (SL.length > 400) SL.splice(0, SL.length - 400);
+        }
+      } catch (e) {}
     }
     await refreshHome(env, state, log);
   }
@@ -1357,8 +1374,26 @@ async function refreshHome(env, state, log) {
   const home = (state.home = state.home || {});
   try { home.tado = await fetchTado(env, state); } catch (e) { home.tado = { ...(home.tado || {}), error: String(e).slice(0, 140) }; }
   try { home.vaillant = await fetchVaillant(env, state); } catch (e) { home.vaillant = { ...(home.vaillant || {}), error: String(e).slice(0, 140) }; }
+  // overnight bedroom temperature sampling (22:00-09:00) for the sleep correlation
+  try {
+    const rooms = ((home.tado || {}).rooms) || [];
+    const bed = rooms.find((r) => /bed/i.test(r.name || ""));
+    if (bed && bed.temp != null) {
+      const hr = parseInt(hhmm().slice(0, 2), 10);
+      if (hr >= 22 || hr < 9) {
+        const dKey = hr >= 22 ? londonDayEndISO(new Date(Date.now() + 864e5)).slice(0, 10) : localMinuteISO().slice(0, 10);
+        const B = (state.bedNights = state.bedNights || {});
+        const rec = (B[dKey] = B[dKey] || { sum: 0, n: 0, min: 99, max: -99, room: bed.name });
+        rec.sum += bed.temp; rec.n++;
+        rec.min = Math.min(rec.min, bed.temp); rec.max = Math.max(rec.max, bed.temp);
+        const ks = Object.keys(B).sort();
+        for (const k of ks.slice(0, Math.max(0, ks.length - 45))) delete B[k];
+      }
+    }
+  } catch (e) {}
   try { home.eero = await fetchEero(env, state); } catch (e) { home.eero = { ...(home.eero || {}), error: String(e).slice(0, 140) }; }
   home.oura = state.oura || { error: "Oura not connected yet" };
+  home.sleepLog = state.sleepLog || [];
   try {
     await env.PW.put("home.enc", await encryptBundle(state, { generated_at: localOffsetISO().slice(0, 19), ...home }));
   } catch (e) { log.push("home blob error: " + String(e).slice(0, 80)); }
