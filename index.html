@@ -130,6 +130,7 @@
   </div>
   <div style="display:flex;justify-content:center;gap:18%;max-width:760px;margin:4px auto 2px;text-align:center">
     <div><div id="fPw" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">POWERWALL</div></div>
+    <div><div id="fHp" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">HEAT PUMP</div></div>
     <div><div id="fGrid" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">GRID</div></div>
   </div>
 </div>
@@ -255,6 +256,7 @@
 const REPO='wzfmdrf7m8-dev/powerwall-dashboard', WF='poll.yml', SVGNS='http://www.w3.org/2000/svg';
 const TARIFF={offpeak:5.90, peak:31.33, start:'23:30', end:'05:30'};  // pence/kWh INC 5% VAT (bill shows 5.62/29.84 ex-VAT)
 let PASS=null,LAST=null,quadCharts={};
+let HPW=null; // latest heat-pump draw {w,t} from worker/live stream
 
 async function deriveKey(pass,salt){
   const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
@@ -358,6 +360,13 @@ function initFlow3D(){
   [[-0.48,0.38],[0.48,0.38],[-0.48,-0.38],[0.48,-0.38]].forEach(p=>{const w=new THREE.Mesh(wg,wm);w.rotation.x=Math.PI/2;w.position.set(p[0],0.17,p[1]);car.add(w)});
   car.position.set(-2.2,0,1.3);scene.add(car);
   box(0.14,0.3,0.08,mat(0xe9e9ee,{r:0.4}),-1.15,0.55,1.12);
+  // heat pump outdoor unit (front-right of the house)
+  box(0.6,0.62,0.32,mat(0xd6d6dc,{r:0.5}),2.9,0.31,1.9);
+  const grille=new THREE.Mesh(new THREE.CircleGeometry(0.19,24),mat(0x1c1c22,{r:0.9}));grille.position.set(2.9,0.34,2.062);scene.add(grille);
+  F3.hpFan=new THREE.Group();
+  {const bl=new THREE.BoxGeometry(0.3,0.04,0.015),bm=mat(0x9a9aa2,{r:0.5,e:0x9a9aa2,ei:0.15});
+   for(let i=0;i<3;i++){const b=new THREE.Mesh(bl,bm);b.rotation.z=i*Math.PI/3;F3.hpFan.add(b)}}
+  F3.hpFan.position.set(2.9,0.34,2.075);scene.add(F3.hpFan);
   const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.07,2.6,10),mat(0x3a3a42));pole.position.set(5.1,1.3,-0.4);scene.add(pole);
   box(0.9,0.07,0.07,mat(0x3a3a42),5.1,2.35,-0.4);
   const cable=(pts)=>{const c=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)));
@@ -368,6 +377,7 @@ function initFlow3D(){
     home: cable([[1.06,0.55,1.14],[1.5,0.62,1.11],[1.85,0.72,1.05]]),
     grid: cable([[1.06,0.4,1.16],[2.6,0.1,1.35],[4.0,0.4,0.6],[5.08,2.28,-0.35]]),
     ev:   cable([[0.96,0.34,1.18],[-0.2,0.07,1.45],[-1.15,0.42,1.14],[-1.62,0.14,1.35],[-2.0,0.3,1.32]]),
+    hp:   cable([[2.55,0.5,1.12],[2.78,0.16,1.5],[2.9,0.3,1.7]]),
   };
   const tex=(()=>{const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');
     const g2=x.createRadialGradient(32,32,0,32,32,32);
@@ -401,6 +411,7 @@ function initFlow3D(){
         s.material.color.copy(f.color);
       });
     }
+    if(F3.hpFan)F3.hpFan.rotation.z+=dt*((F3.flows.hp&&F3.flows.hp.on)?7:0.4);
     const w=W(),h=H();
     if(Math.abs(canvas.clientWidth-w)>2||canvas.height!==Math.round(h*renderer.getPixelRatio())){
       renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();
@@ -414,8 +425,11 @@ function initFlow3D(){
 function renderFlow(L){
   const kwf=w=>((Math.abs(w||0))/1000).toFixed(1)+' kW';
   const ev=(((LAST||{}).ohme&&!(LAST.ohme||{}).error&&(LAST.ohme.power||{}).watts)||0);
+  const hp=(HPW&&HPW.w)||0;
+  const homeW=Math.max(0,(L.load_power||0)-hp);
   el('fSolar').textContent=kwf(L.solar_power);
-  el('fHome').textContent=kwf(L.load_power);
+  el('fHome').textContent=kwf(homeW);
+  el('fHp').textContent=kwf(hp);
   el('fGrid').textContent=kwf(L.grid_power);
   el('fCar').textContent=kwf(ev);
   const soc=L.percentage_charged||0;
@@ -428,7 +442,8 @@ function renderFlow(L){
       f.n=Math.max(2,Math.min(8,Math.round(a/900)+2));f.color.set(color)};
     setF('solar',L.solar_power,0xffd60a,1);
     setF('pw',L.battery_power,0x34c759,(L.battery_power||0)>0?-1:1);
-    setF('home',L.load_power,0x58a6ff,1);
+    setF('home',homeW,0x58a6ff,1);
+    setF('hp',hp>60?hp:0,0xff9f0a,1);
     setF('grid',L.grid_power,(L.grid_power||0)>0?0xff453a:0x34c759,(L.grid_power||0)>0?-1:1);
     setF('ev',ev>250?ev:0,0x58a6ff,1);
     if(F3.led)F3.led.material.emissiveIntensity=Math.abs(L.battery_power||0)>50?1.6:0.5;
@@ -667,6 +682,7 @@ function startLive(){
   s.onmessage=ev=>{
     let j={};try{j=JSON.parse(ev.data)}catch(e){return}
     if(j.type==='live'&&j.live){
+      if(j.hp)HPW=j.hp;
       if(LAST)LAST.live=j.live;
       renderLiveNums(j.live);
       renderFlow(j.live);
@@ -814,6 +830,7 @@ function renderQuads(d){
 
 function render(d){
   LAST=d;
+  if(d.hp)HPW=d.hp;
   el('title').textContent=d.site_name||'Powerwall';
   el('updated').textContent='Updated '+new Date(d.generated_at).toLocaleString();
   const L=d.live||{};
