@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Heating</title>
+<title>Heat pump</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Heating">
+<meta name="apple-mobile-web-app-title" content="Heat pump">
 <meta name="theme-color" content="#f5f5f7">
 <style>
   :root{--bg:#f5f5f7;--card:#fff;--edge:rgba(0,0,0,.05);--txt:#1d1d1f;--dim:#6e6e73;
-    --mint:#34c759;--sun:#ff9500;--cyan:#007aff;--pink:#ff3b30;--violet:#af52de}
+    --mint:#34c759;--sun:#ff9500;--cyan:#007aff;--pink:#ff3b30}
   *{box-sizing:border-box;margin:0}
   html,body{overflow-x:hidden;max-width:100vw}
   body{color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif;
@@ -21,14 +21,12 @@
   nav a.on{background:#1d1d1f;color:#fff;border-color:#1d1d1f}
   h1{font-size:22px;font-weight:700;margin-bottom:2px}
   .sub{color:var(--dim);font-size:13px;margin-bottom:16px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;margin-bottom:18px}
   .card{background:var(--card);border:1px solid var(--edge);border-radius:18px;padding:16px 18px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
-  .room h3{font-size:14px;font-weight:600;color:var(--dim)}
-  .room .temp{font-size:32px;font-weight:700;letter-spacing:-.02em}
-  .room .meta{font-size:12px;color:var(--dim)}
-  .bar{height:5px;background:#ececf0;border-radius:3px;margin-top:10px;overflow:hidden}
-  .bar i{display:block;height:5px;background:var(--sun);border-radius:3px}
-  .tag{display:inline-block;font-size:11px;border-radius:99px;padding:2px 9px;background:#f5f5f7;border:1px solid #e5e5ea;color:var(--dim);margin-left:6px;vertical-align:middle}
+  .card h3{font-size:13px;font-weight:600;color:var(--dim)}
+  .card .v{font-size:30px;font-weight:700;letter-spacing:-.02em}
+  .card .m{font-size:12px;color:var(--dim)}
+  .ok{color:var(--mint)} .warn{color:var(--pink)}
   .err{color:var(--pink);font-size:13px;margin:10px 0}
   #overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:10}
   #overlay .box{background:#fff;border:1px solid var(--edge);padding:32px;border-radius:22px;width:320px;text-align:center}
@@ -38,12 +36,13 @@
 </head>
 <body>
 <nav>
-  <a href="./">⚡ Energy</a><a class="on" href="heating">🌡 Heating</a><a href="heatpump">♨️ Heat pump</a><a href="network">📶 Network</a>
+  <a href="./">⚡ Energy</a><a href="heating">🌡 Heating</a><a class="on" href="heatpump">♨️ Heat pump</a><a href="network">📶 Network</a>
 </nav>
-<h1>Heating</h1>
+<h1>Heat pump</h1>
 <div class="sub" id="sub">…</div>
 <div class="err" id="err"></div>
-<div class="grid" id="rooms"></div>
+<div class="grid" id="cards"></div>
+<div class="grid" id="zones"></div>
 
 <div id="overlay" style="display:none"><div class="box">
   <h1 style="font-size:18px;margin-bottom:12px">Unlock</h1>
@@ -68,20 +67,18 @@ async function loadHome(pass){
   const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
   return JSON.parse(new TextDecoder().decode(pt));
 }
+function card(h,v,m,cls){return `<div class="card"><h3>${h}</h3><div class="v ${cls||''}">${v}</div><div class="m">${m||''}</div></div>`}
 function render(d){
-  const t=d.tado||{};
-  el('err').textContent=t.error?('tado: '+t.error):'';
-  el('sub').textContent=(t.outside!=null?`outside ${t.outside.toFixed(1)}° · `:'')+
-    (t.weather?t.weather.toLowerCase().replace(/_/g,' ')+' · ':'')+
-    (t.presence?('home mode: '+t.presence.toLowerCase()+' · '):'')+'updated '+(d.generated_at||'').slice(11,16);
-  const rooms=t.rooms||[];
-  el('rooms').innerHTML=rooms.map(r=>`
-    <div class="card room">
-      <h3>${r.name}${r.openWindow?'<span class="tag">window open</span>':''}${r.mode==='OFF'?'<span class="tag">off</span>':''}</h3>
-      <div class="temp">${r.temp!=null?r.temp.toFixed(1):'–'}°</div>
-      <div class="meta">${r.target!=null?('target '+r.target.toFixed(1)+'°'):'no target'}${r.humidity!=null?(' · '+r.humidity.toFixed(0)+'% rh'):''}</div>
-      <div class="bar"><i style="width:${Math.min(100,r.power||0)}%"></i></div>
-    </div>`).join('')||'<div class="sub">No rooms yet — connect tado from the Energy page controls.</div>';
+  const v=d.vaillant||{};
+  el('err').textContent=v.error?('vaillant: '+v.error):'';
+  el('sub').textContent=(v.outdoor!=null?`outdoor ${v.outdoor.toFixed(1)}° · `:'')+'updated '+(d.generated_at||'').slice(11,16);
+  const cards=[];
+  if(v.flowTemp!=null) cards.push(card('Flow temperature',v.flowTemp.toFixed(0)+'°',''));
+  if(v.dhwTemp!=null) cards.push(card('Hot water tank',v.dhwTemp.toFixed(0)+'°',v.dhwTarget!=null?('target '+v.dhwTarget.toFixed(0)+'°'):''));
+  if(v.pressure!=null) cards.push(card('Pressure',v.pressure.toFixed(1)+' bar',v.pressure>=1&&v.pressure<=2.5?'healthy':'check pressure',v.pressure>=1&&v.pressure<=2.5?'ok':'warn'));
+  if(v.outdoor!=null) cards.push(card('Outdoor sensor',v.outdoor.toFixed(1)+'°',''));
+  el('cards').innerHTML=cards.join('')||'<div class="sub">No heat pump data yet — add your myVAILLANT credentials (I’ll walk you through it).</div>';
+  el('zones').innerHTML=(v.zones||[]).map(z=>card(z.name,(z.temp!=null?z.temp.toFixed(1):'–')+'°',(z.target!=null?('target '+z.target.toFixed(1)+'°'):'')+(z.humidity!=null?(' · '+z.humidity.toFixed(0)+'% rh'):''))).join('');
 }
 async function unlock(pass){
   try{
