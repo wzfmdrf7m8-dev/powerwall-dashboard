@@ -113,6 +113,7 @@ async function loadState(env) {
   if (!state.mig_tel1) { state.lastOcto = 0; state.mig_tel1 = 1; }
   // one-time migration (2026-07-20): hot water to 65° during Ohme slots (requested)
   if (!state.mig_dhw1) { state.config.dhw_ohme_slots = true; state.mig_dhw1 = 1; }
+  if (!state.mig_dhw2) { state.dhwBoosted = 0; state.mig_dhw2 = 1; } // re-arm after adding boost support
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -500,6 +501,17 @@ async function vaillantSetDhw(env, state, temp) {
   });
   if (!r.ok && r.status !== 204) throw new Error(`dhw set ${r.status}: ${(await r.text()).slice(0, 80)}`);
 }
+async function vaillantDhwBoost(env, state, on) {
+  const tok = await vaillantToken(env, state);
+  const base = (state.vaillantCtrl === "vrc700" ? VAILLANT_API.replace("end-user-app-api/v1", "vrc700/v1") : VAILLANT_API)
+    + `/systems/${state.vaillantSys}/${state.vaillantCtrl || "tli"}`;
+  const r = await fetch(`${base}/domestic-hot-water/0/boost`, {
+    method: on ? "POST" : "DELETE",
+    headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json", "x-app-identifier": "VAILLANT", "Accept-Language": "en-GB", "x-client-locale": "en-GB", "x-idm-identifier": "KEYCLOAK", "ocp-apim-subscription-key": "1e0a2f3511fb4c5bbb1c7f9fedd20b1c", "User-Agent": "okhttp/4.9.2" },
+    body: on ? "{}" : undefined,
+  });
+  if (!r.ok && r.status !== 204) throw new Error(`dhw boost ${r.status}: ${(await r.text()).slice(0, 80)}`);
+}
 async function applyAutomation(env, state, sid, siteInfo, log) {
   const cfg = state.config;
   const setReserve = async (pct, why) => {
@@ -533,13 +545,17 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     const inSlot2 = ohmeOk2 && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso2 && nowIso2 < sl.end);
     try {
       if (inSlot2 && !state.dhwBoosted) {
-        state.dhwPrev = (((state.home || {}).vaillant) || {}).dhwTarget ?? 50;
+        const cur = (((state.home || {}).vaillant) || {}).dhwTarget ?? 50;
+        state.dhwPrev = cur >= 60 ? (state.dhwPrev ?? 50) : cur;   // never save a boosted target as "previous"
         await vaillantSetDhw(env, state, 65);
+        // setpoint alone is passive — the boost forces heating now, regardless of the DHW schedule
+        try { await vaillantDhwBoost(env, state, true); log.push(`hot water -> 65° + boost on (ohme slot, was ${state.dhwPrev}°)`); }
+        catch (e) { log.push(`hot water -> 65°, boost failed: ${String(e).slice(0, 70)}`); }
         state.dhwBoosted = 1;
-        log.push(`hot water -> 65° (ohme slot, was ${state.dhwPrev}°)`);
       } else if (!inSlot2 && state.dhwBoosted) {
         await vaillantSetDhw(env, state, state.dhwPrev ?? 50);
-        log.push(`hot water -> ${state.dhwPrev ?? 50}° (slot ended)`);
+        try { await vaillantDhwBoost(env, state, false); } catch (e) {}
+        log.push(`hot water -> ${state.dhwPrev ?? 50}°, boost off (slot ended)`);
         state.dhwBoosted = 0;
       }
     } catch (e) { log.push("dhw automation: " + String(e).slice(0, 100)); }
