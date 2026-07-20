@@ -53,7 +53,8 @@
     .pill{font-size:11px;padding:3px 9px}
   }
   .toolbar h2{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;flex:1}
-  #flow{width:100%;max-width:540px;height:auto;display:block;margin:auto}
+  #flow{width:100%;max-width:680px;height:auto;display:block;margin:auto}
+  #flow text{font-family:inherit}
   .node-label{fill:var(--txt);font-size:14px;font-weight:700;text-anchor:middle;letter-spacing:.02em}
   .node-val{fill:var(--dim);font-size:13px;text-anchor:middle;font-variant-numeric:tabular-nums}
   .wire{fill:none;stroke:#e5e5ea;stroke-width:2.5;stroke-linecap:round}
@@ -114,27 +115,54 @@
   <button class="sec" style="font-size:12px;padding:5px 12px" onclick="lockNow()">Lock</button>
 </header>
 
-<div class="card" id="controlsCard">
-  <h2>Controls</h2>
-  <div class="row">
-    <input id="rsv" type="number" min="0" max="100" placeholder="%" style="width:74px"><button onclick="cmd('reserve',val('rsv'))">Set reserve</button>
-    <select id="mode"><option value="self_consumption">self_consumption</option><option value="autonomous">autonomous (time-based)</option></select>
-    <button onclick="cmd('mode',val('mode'))">Set mode</button>
-    <button onclick="cmd('storm','on')">Storm on</button><button class="sec" onclick="cmd('storm','off')">Storm off</button>
-    <button onclick="cmd('grid_charging','on')">Allow grid charging</button><button class="sec" onclick="cmd('grid_charging','off')">Block grid charging</button>
-    <button onclick="cmd('export_rule','everything')">Export: everything (solar + PW)</button><button class="sec" onclick="cmd('export_rule','solar')">Export: solar only</button>
-    <button class="sec" onclick="cmd('poll','')">Refresh now</button>
-    <button class="sec" onclick="cmd('backfill','')">Backfill history</button>
-  </div>
-  <div class="row">
-    <button onclick="cmd('follow_ohme','on')">Charge Powerwall during Ohme slots: ON</button>
-    <button class="sec" onclick="cmd('follow_ohme','off')">OFF</button>
-    <button class="sec" onclick="cmd('tado_auth','')">Connect tado</button>
-    <input id="eeroEmail" type="email" placeholder="eero account email" style="width:180px"><button class="sec" onclick="cmd('eero_login',val('eeroEmail'))">Connect eero</button>
-    <input id="eeroCode" placeholder="eero code" style="width:100px"><button class="sec" onclick="cmd('eero_verify',val('eeroCode'))">Verify</button>
-    <input id="pat" type="password" placeholder="GitHub token (stored in this browser only)" style="flex:1;min-width:220px"><button class="sec" onclick="savePat()">Save token</button>
-  </div>
-  <div class="err" id="cmderr"></div>
+<div class="card" id="flowCard" style="background:#141419;border-color:#26262b;margin-bottom:16px">
+  <h2 style="color:#7a7a82">Live energy flow</h2>
+  <div id="fStatus" style="color:#34c759;font-weight:700;font-size:15px;margin:-2px 0 4px">–</div>
+  <svg id="flow" viewBox="0 0 720 540">
+    <rect x="0" y="428" width="720" height="1.5" fill="#26262b"/>
+    <path id="w_grid" class="wire" style="stroke:#2e2e35" d="M448 350 Q560 385 705 428"/>
+    <polygon points="60,302 150,238 240,302" fill="#31313a"/>
+    <rect x="60" y="302" width="180" height="126" fill="#26262b"/>
+    <rect x="88" y="330" width="124" height="98" fill="#0f0f13"/>
+    <path d="M120 377 Q136 356 160 356 Q180 356 188 377 Z" fill="#2559c4"/>
+    <path d="M102 402 Q104 380 122 376 L182 376 Q200 380 206 402 Z" fill="#2f6fed"/>
+    <rect x="100" y="399" width="110" height="14" rx="7" fill="#2f6fed"/>
+    <circle cx="126" cy="415" r="10" fill="#0b0b0e" stroke="#3d3d46" stroke-width="3"/>
+    <circle cx="186" cy="415" r="10" fill="#0b0b0e" stroke="#3d3d46" stroke-width="3"/>
+    <rect x="68" y="336" width="11" height="20" rx="3" fill="#e8e8ec"/>
+    <path id="w_ev" class="wire" style="stroke:#2e2e35" d="M74 356 Q74 396 102 400"/>
+    <rect x="240" y="268" width="330" height="160" fill="#2a2a31"/>
+    <polygon points="222,268 340,180 606,180 588,268" fill="#33333b"/>
+    <polygon points="248,258 352,192 576,192 556,258" fill="#0e0e13" stroke="#3a3a44" stroke-width="1.5"/>
+    <path d="M300 258 L398 192 M352 258 L444 192 M404 258 L490 192 M456 258 L536 192 M274 225 L566 225" stroke="#26262c" stroke-width="1.5" fill="none"/>
+    <rect x="474" y="300" width="34" height="54" rx="2" fill="#101015" stroke="#3f3f48"/>
+    <rect x="524" y="300" width="34" height="54" rx="2" fill="#101015" stroke="#3f3f48"/>
+    <path d="M491 300 V354 M474 327 H508 M541 300 V354 M524 327 H558" stroke="#2c2c33" stroke-width="1.5"/>
+    <path id="w_solar" class="wire" style="stroke:#2e2e35" d="M420 196 L420 330 Q420 344 432 346"/>
+    <path id="w_pw" class="wire" style="stroke:#2e2e35" d="M430 350 L352 372"/>
+    <path id="w_home" class="wire" style="stroke:#2e2e35" d="M448 342 Q468 338 474 328"/>
+    <path id="w_evfeed" class="wire" style="stroke:#2e2e35" d="M432 360 L240 386 L79 386 Q68 386 68 372 L68 356"/>
+    <rect x="430" y="336" width="18" height="26" rx="3" fill="#3d3d46"/>
+    <rect x="306" y="336" width="46" height="88" rx="7" fill="#ececf0"/>
+    <rect x="311" y="343" width="4" height="74" rx="2" fill="#34c759"/>
+    <g stroke="#4a4a52" stroke-width="1">
+      <line x1="150" y1="104" x2="150" y2="330"/>
+      <line x1="420" y1="104" x2="420" y2="188"/>
+      <line x1="612" y1="104" x2="612" y2="296"/>
+      <line x1="329" y1="432" x2="329" y2="464"/>
+      <line x1="612" y1="418" x2="612" y2="464"/>
+    </g>
+    <text id="fCar" x="150" y="72" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
+    <text x="150" y="96" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">MODEL 3</text>
+    <text id="fSolar" x="420" y="72" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
+    <text x="420" y="96" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">SOLAR</text>
+    <text id="fHome" x="612" y="72" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
+    <text x="612" y="96" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">HOME</text>
+    <text id="fPw" x="329" y="494" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
+    <text x="329" y="518" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">POWERWALL</text>
+    <text id="fGrid" x="612" y="494" fill="#f5f5f7" font-size="30" font-weight="700" text-anchor="middle">–</text>
+    <text x="612" y="518" fill="#9a9aa2" font-size="12.5" letter-spacing="2" text-anchor="middle">GRID</text>
+  </svg>
 </div>
 
 <div class="toolbar">
@@ -177,57 +205,7 @@
   </div>
 </div>
 
-<div class="layout">
-  <div class="card">
-    <h2>Live energy flow</h2>
-    <svg id="flow" viewBox="0 0 620 330">
-      <defs>
-        <linearGradient id="wSun" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ff9500"/><stop offset="100%" stop-color="#ff9e00"/></linearGradient>
-        <linearGradient id="wMint" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#34c759"/><stop offset="100%" stop-color="#007aff"/></linearGradient>
-        <linearGradient id="wPink" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#ff3b30"/><stop offset="100%" stop-color="#ff8fa3"/></linearGradient>
-        <radialGradient id="gSun"><stop offset="0%" stop-color="rgba(255,149,0,.35)"/><stop offset="100%" stop-color="rgba(255,149,0,0)"/></radialGradient>
-        <radialGradient id="gGrid"><stop offset="0%" stop-color="rgba(255,59,48,.30)"/><stop offset="100%" stop-color="rgba(255,59,48,0)"/></radialGradient>
-        <radialGradient id="gHome"><stop offset="0%" stop-color="rgba(0,122,255,.32)"/><stop offset="100%" stop-color="rgba(0,122,255,0)"/></radialGradient>
-        <radialGradient id="gBatt"><stop offset="0%" stop-color="rgba(52,199,89,.32)"/><stop offset="100%" stop-color="rgba(52,199,89,0)"/></radialGradient>
-      </defs>
-      <path id="p_sh" class="wire" d="M 340 82 Q 480 110 520 208"/>
-      <path id="p_sb" class="wire" d="M 310 96 L 310 226"/>
-      <path id="p_sg" class="wire" d="M 280 82 Q 140 110 100 208"/>
-      <path id="p_gh" class="wire" d="M 128 240 Q 310 172 492 240"/>
-      <path id="p_gb" class="wire" d="M 122 258 Q 200 288 272 254"/>
-      <path id="p_bh" class="wire" d="M 348 254 Q 420 288 498 258"/>
-      <g id="dots"></g>
-      <g transform="translate(310,50)">
-        <circle r="48" fill="url(#gSun)" class="nodePulse"/>
-        <circle r="32" fill="rgba(255,149,0,.10)" stroke="url(#wSun)" stroke-width="2.5"/>
-        <text y="8" text-anchor="middle" font-size="25">&#9728;&#65039;</text>
-        <text class="node-label" x="-56" y="6">Solar</text>
-        <text id="v_solar" class="node-val" y="52">–</text>
-      </g>
-      <g transform="translate(96,240)">
-        <circle r="48" fill="url(#gGrid)" class="nodePulse"/>
-        <circle r="32" fill="rgba(255,59,48,.10)" stroke="url(#wPink)" stroke-width="2.5"/>
-        <text y="8" text-anchor="middle" font-size="23">&#128509;</text>
-        <text class="node-label" y="-42">Grid</text>
-        <text id="v_grid" class="node-val" y="54">–</text>
-      </g>
-      <g transform="translate(524,240)">
-        <circle r="48" fill="url(#gHome)" class="nodePulse"/>
-        <circle r="32" fill="rgba(0,122,255,.12)" stroke="#007aff" stroke-width="2.5"/>
-        <text y="8" text-anchor="middle" font-size="23">&#127968;</text>
-        <text class="node-label" y="-42">Home</text>
-        <text id="v_load" class="node-val" y="54">–</text>
-      </g>
-      <g transform="translate(310,258)">
-        <circle r="50" fill="url(#gBatt)" class="nodePulse"/>
-        <rect x="-30" y="-26" width="60" height="52" rx="10" fill="rgba(52,199,89,.08)" stroke="url(#wMint)" stroke-width="2.5"/>
-        <rect id="battFill" x="-26" y="22" width="52" height="0" rx="6" fill="rgba(52,199,89,.5)"/>
-        <text id="battPct" y="6" text-anchor="middle" font-size="14" font-weight="700" fill="#1d1d1f">–</text>
-        <text class="node-label" y="-38">Powerwall</text>
-        <text id="v_batt" class="node-val" y="46">–</text>
-      </g>
-    </svg>
-  </div>
+<div class="quadgrid">
   <div>
     <div class="card">
       <h2>Today</h2>
@@ -248,7 +226,9 @@
       </div>
       <div class="sub" style="margin-top:6px;font-size:11.5px">Estimated from poller samples</div>
     </div>
-    <div class="card" style="margin-top:12px" id="octoCard" hidden>
+  </div>
+  <div>
+    <div class="card" id="octoCard" hidden>
       <h2>Octopus metered <span id="o_day" style="text-transform:none;letter-spacing:0"></span></h2>
       <div class="today">
         <div class="cost">Imported<b id="o_imp">–</b></div>
@@ -275,6 +255,29 @@
       <div id="lastlog" class="sub" style="margin-top:6px"></div>
     </div>
   </div>
+</div>
+
+<div class="card" id="controlsCard" style="margin-top:0">
+  <h2>Controls</h2>
+  <div class="row">
+    <input id="rsv" type="number" min="0" max="100" placeholder="%" style="width:74px"><button onclick="cmd('reserve',val('rsv'))">Set reserve</button>
+    <select id="mode"><option value="self_consumption">self_consumption</option><option value="autonomous">autonomous (time-based)</option></select>
+    <button onclick="cmd('mode',val('mode'))">Set mode</button>
+    <button onclick="cmd('storm','on')">Storm on</button><button class="sec" onclick="cmd('storm','off')">Storm off</button>
+    <button onclick="cmd('grid_charging','on')">Allow grid charging</button><button class="sec" onclick="cmd('grid_charging','off')">Block grid charging</button>
+    <button onclick="cmd('export_rule','everything')">Export: everything (solar + PW)</button><button class="sec" onclick="cmd('export_rule','solar')">Export: solar only</button>
+    <button class="sec" onclick="cmd('poll','')">Refresh now</button>
+    <button class="sec" onclick="cmd('backfill','')">Backfill history</button>
+  </div>
+  <div class="row">
+    <button onclick="cmd('follow_ohme','on')">Charge Powerwall during Ohme slots: ON</button>
+    <button class="sec" onclick="cmd('follow_ohme','off')">OFF</button>
+    <button class="sec" onclick="cmd('tado_auth','')">Connect tado</button>
+    <input id="eeroEmail" type="email" placeholder="eero account email" style="width:180px"><button class="sec" onclick="cmd('eero_login',val('eeroEmail'))">Connect eero</button>
+    <input id="eeroCode" placeholder="eero code" style="width:100px"><button class="sec" onclick="cmd('eero_verify',val('eeroCode'))">Verify</button>
+    <input id="pat" type="password" placeholder="GitHub token (stored in this browser only)" style="flex:1;min-width:220px"><button class="sec" onclick="savePat()">Save token</button>
+  </div>
+  <div class="err" id="cmderr"></div>
 </div>
 
 <script>
@@ -345,56 +348,30 @@ function rateAt(hhmm){ return isOffpeak(hhmm)?TARIFF.offpeak:TARIFF.peak }
 function sampleOffpeak(p){ return isOffpeak((p.t||'').slice(11,16)) || !!p.io || ((p.ev||0)>250) }
 function sampleRate(p){ return sampleOffpeak(p)?TARIFF.offpeak:TARIFF.peak }
 
-/* ---- flow dots ---- */
-function setDots(pathId,watts,color,reverse){
-  const w=Math.abs(watts||0), path=el(pathId);
-  path.classList.toggle('active',w>50);
-  path.style.stroke=w>50?color:'';
-  path.style.filter=w>50?`drop-shadow(0 0 4px ${color})`:'';
-  path.style.opacity=w>50?'0.55':'';
-  if(w<=50) return;
-  const n=Math.min(5,1+Math.floor(w/1200));
-  const dur=Math.max(1.0,4.2-3*Math.min(1,w/8000));
-  for(let i=0;i<n;i++){
-    const c=document.createElementNS(SVGNS,'circle');
-    c.setAttribute('r',w>3000?5.5:4.5); c.setAttribute('fill',color);
-    c.style.filter=`drop-shadow(0 0 8px ${color})`;
-    const m=document.createElementNS(SVGNS,'animateMotion');
-    m.setAttribute('dur',dur+'s'); m.setAttribute('repeatCount','indefinite');
-    m.setAttribute('begin',(-i*dur/n)+'s');
-    if(reverse){m.setAttribute('keyPoints','1;0');m.setAttribute('keyTimes','0;1');m.setAttribute('calcMode','linear');}
-    const mp=document.createElementNS(SVGNS,'mpath');
-    mp.setAttributeNS('http://www.w3.org/1999/xlink','href','#'+pathId);
-    m.appendChild(mp); c.appendChild(m); el('dots').appendChild(c);
-  }
-}
+/* ---- Tesla-style live flow scene ---- */
 function renderFlow(L){
-  el('dots').innerHTML='';
-  const solar=L.solar_power||0, load=L.load_power||0, grid=L.grid_power||0, batt=L.battery_power||0;
-  const gridImp=Math.max(grid,0), gridExp=Math.max(-grid,0);
-  const battDis=Math.max(batt,0), battChg=Math.max(-batt,0);
-  const solarToBatt=Math.min(solar,battChg);
-  const solarToHome=Math.min(solar-solarToBatt,load);
-  const solarToGrid=Math.min(Math.max(solar-solarToBatt-solarToHome,0),gridExp);
-  const battToHome=Math.min(battDis,Math.max(load-solarToHome,0));
-  const battToGrid=Math.max(battDis-battToHome,0);
-  const gridToBatt=Math.max(battChg-solarToBatt,0);
-  const gridToHome=Math.max(gridImp-gridToBatt,0);
-  setDots('p_sh',solarToHome,'#ff9500');
-  setDots('p_sb',solarToBatt,'#ff9500');
-  setDots('p_sg',solarToGrid,'#34c759');
-  setDots('p_gh',gridToHome,'#ff3b30');
-  setDots('p_gb',gridToBatt,'#ff3b30');
-  setDots('p_bh',battToHome,'#34c759');
-  if(battToGrid>50) setDots('p_gb',battToGrid,'#34c759',true);
-  el('v_solar').textContent=kw(solar);
-  el('v_grid').textContent=(grid<-50?'← ':grid>50?'→ ':'')+kw(Math.abs(grid));
-  el('v_load').textContent=kw(load);
-  el('v_batt').textContent=(batt<-50?'charging ':batt>50?'discharging ':'')+kw(Math.abs(batt));
+  const kwf=w=>((Math.abs(w||0))/1000).toFixed(1)+' kW';
+  const ev=(((LAST||{}).ohme&&!(LAST.ohme||{}).error&&(LAST.ohme.power||{}).watts)||0);
+  el('fSolar').textContent=kwf(L.solar_power);
+  el('fHome').textContent=kwf(L.load_power);
+  el('fGrid').textContent=kwf(L.grid_power);
+  el('fCar').textContent=kwf(ev);
   const soc=L.percentage_charged||0;
-  el('battPct').textContent=soc.toFixed(0)+'%';
-  const h=Math.max(2,44*soc/100);
-  el('battFill').setAttribute('y',22-h); el('battFill').setAttribute('height',h);
+  el('fPw').textContent=kwf(L.battery_power)+' · '+soc.toFixed(0)+'%';
+  const set=(id,on,color)=>{const p=el(id);if(!p)return;p.classList.toggle('active',!!on);p.style.stroke=on?color:'#2e2e35'};
+  set('w_solar',(L.solar_power||0)>50,'#ffd60a');
+  set('w_pw',Math.abs(L.battery_power||0)>50,'#34c759');
+  set('w_grid',Math.abs(L.grid_power||0)>50,(L.grid_power||0)>0?'#ff453a':'#34c759');
+  set('w_home',(L.load_power||0)>50,'#58a6ff');
+  set('w_ev',ev>250,'#58a6ff');
+  set('w_evfeed',ev>250,'#58a6ff');
+  let st='Idle';
+  if(ev>250)st='Charging';
+  else if((L.grid_power||0)<-50)st='Exporting';
+  else if((L.battery_power||0)<-50)st='Charging Powerwall';
+  else if((L.battery_power||0)>50)st='Powering home';
+  else if((L.solar_power||0)>50)st='Solar powering home';
+  el('fStatus').textContent=st;
   el('socArc').style.strokeDashoffset=194.8*(1-soc/100);
   el('socTxt').textContent=soc.toFixed(0)+'%';
 }
