@@ -832,6 +832,19 @@ async function pollCycle(env, state, opts = {}) {
     }
   }
 
+  // heat pump live draw (myVAILLANT mpc) every tick — feeds the flow scene
+  if (env.MYVAILLANT_EMAIL && state.vaillantSys) {
+    try {
+      const tok = await vaillantToken(env, state);
+      const r = await fetch(`${VAILLANT_API}/hem/${state.vaillantSys}/mpc`, { headers: { Authorization: `Bearer ${tok}`, "x-app-identifier": "VAILLANT", "Accept-Language": "en-GB", "Accept": "application/json, text/plain, */*", "x-client-locale": "en-GB", "x-idm-identifier": "KEYCLOAK", "ocp-apim-subscription-key": "1e0a2f3511fb4c5bbb1c7f9fedd20b1c", "User-Agent": "okhttp/4.9.2" } });
+      if (r.ok) {
+        const mpc = await r.json();
+        const w = ((mpc || {}).devices || []).reduce((a, d) => a + (d.currentPower ?? d.current_power ?? 0), 0);
+        state.hp = { w: Math.round(w), t: new Date().toISOString() };
+      }
+    } catch (e) {}
+  }
+
   const bundle = {
     generated_at: localOffsetISO().slice(0, 19),
     site_name: state.siteName,
@@ -849,6 +862,7 @@ async function pollCycle(env, state, opts = {}) {
     log: log.length ? log : (state.lastLog || []),
     octopus: state.octopus ? { ...state.octopus, daily: (state.octopus.daily || []).slice(-60) } : null,
     ohme: state.ohmeData || null,
+    hp: state.hp || null,
     source: "cloudflare-worker",
   };
   const enc = await encryptBundle(state, bundle);
@@ -860,6 +874,7 @@ async function pollCycle(env, state, opts = {}) {
       access_token: state.access_token, access_exp: state.access_exp, siteId: state.siteId,
     }));
   } catch (e) {}
+  try { if (state.hp) await env.PW.put("hp.json", JSON.stringify(state.hp)); } catch (e) {}
   // archive blob (day bins + full daily history), written only when it changes
   // (~every 30 min) — keeps the every-minute encrypt small and CPU per tick down
   if (state.binsDirty) {
@@ -1346,7 +1361,11 @@ export class LiveHub {
     if (authed.length) {
       try {
         const live = await this.teslaLive();
-        const payload = JSON.stringify({ type: "live", t: new Date().toISOString(), live });
+        if (!this.hpT || Date.now() - this.hpT > 30000) {
+          this.hpT = Date.now();
+          try { const o = await this.env.PW.get("hp.json"); this.hp = o ? JSON.parse(await o.text()) : null; } catch (e) {}
+        }
+        const payload = JSON.stringify({ type: "live", t: new Date().toISOString(), live, hp: this.hp || null });
         for (const w of authed) { try { w.send(payload); } catch (e) {} }
       } catch (e) { /* stale token beat — cron refreshes access.json within a minute */ }
     }
