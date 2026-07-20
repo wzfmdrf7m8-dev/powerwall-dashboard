@@ -117,21 +117,21 @@
   <button class="sec" style="font-size:12px;padding:5px 12px" onclick="lockNow()">Lock</button>
 </header>
 
-<div class="card" id="flowCard" style="background:#141419;border-color:#26262b;margin-bottom:16px">
-  <h2 style="color:#7a7a82">Live energy flow</h2>
+<div class="card" id="flowCard" style="margin-bottom:16px">
+  <h2>Live energy flow</h2>
   <div id="fStatus" style="color:#34c759;font-weight:700;font-size:15px;margin:-2px 0 4px">–</div>
   <div style="display:flex;justify-content:space-around;max-width:760px;margin:6px auto 4px;text-align:center">
-    <div><div id="fCar" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">IONIQ 9</div></div>
-    <div><div id="fSolar" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">SOLAR</div></div>
-    <div><div id="fHome" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">HOME</div></div>
+    <div><div id="fCar" style="font-size:24px;font-weight:700;color:#1d1d1f">–</div><div style="font-size:11px;letter-spacing:2px;color:#6e6e73">IONIQ 9</div></div>
+    <div><div id="fSolar" style="font-size:24px;font-weight:700;color:#1d1d1f">–</div><div style="font-size:11px;letter-spacing:2px;color:#6e6e73">SOLAR</div></div>
+    <div><div id="fHome" style="font-size:24px;font-weight:700;color:#1d1d1f">–</div><div style="font-size:11px;letter-spacing:2px;color:#6e6e73">HOME</div></div>
   </div>
   <div id="flow3dwrap" style="width:100%;max-width:760px;margin:auto">
     <canvas id="flow3d" style="width:100%;display:block;border-radius:12px"></canvas>
   </div>
   <div style="display:flex;justify-content:center;gap:18%;max-width:760px;margin:4px auto 2px;text-align:center">
-    <div><div id="fPw" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">POWERWALL</div></div>
-    <div><div id="fHp" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">HEAT PUMP</div></div>
-    <div><div id="fGrid" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">GRID</div></div>
+    <div><div id="fPw" style="font-size:24px;font-weight:700;color:#1d1d1f">–</div><div style="font-size:11px;letter-spacing:2px;color:#6e6e73">POWERWALL</div></div>
+    <div><div id="fHp" style="font-size:24px;font-weight:700;color:#1d1d1f">–</div><div style="font-size:11px;letter-spacing:2px;color:#6e6e73">HEAT PUMP</div></div>
+    <div><div id="fGrid" style="font-size:24px;font-weight:700;color:#1d1d1f">–</div><div style="font-size:11px;letter-spacing:2px;color:#6e6e73">GRID</div></div>
   </div>
 </div>
 
@@ -331,23 +331,24 @@ function initFlow3D(){
   const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
   renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
   const scene=new THREE.Scene();
-  scene.background=new THREE.Color(0x141419);
-  scene.fog=new THREE.Fog(0x141419,10,17);
+  scene.background=new THREE.Color(0xeef0f4);
+  scene.fog=new THREE.Fog(0xeef0f4,10,17);
   const cam=new THREE.PerspectiveCamera(33,1.66,0.1,60);
   cam.position.set(5.4,4.4,7.6);
-  scene.add(new THREE.HemisphereLight(0x93a7ff,0x0c0c12,0.9));
+  scene.add(new THREE.HemisphereLight(0xffffff,0x9aa0b0,1.05));
   const sun=new THREE.DirectionalLight(0xffffff,0.95);sun.position.set(4,8,5);scene.add(sun);
   const mat=(c,o={})=>new THREE.MeshStandardMaterial({color:c,roughness:o.r??0.85,metalness:o.m??0.08,emissive:o.e??0x000000,emissiveIntensity:o.ei??1});
   const box=(w,h,d,m,x,y,z)=>{const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);b.position.set(x,y,z);scene.add(b);return b};
-  const ground=new THREE.Mesh(new THREE.CircleGeometry(15,48),new THREE.MeshStandardMaterial({color:0x101016,roughness:1}));
+  const ground=new THREE.Mesh(new THREE.CircleGeometry(15,48),new THREE.MeshStandardMaterial({color:0xdfe2e8,roughness:1}));
   ground.rotation.x=-Math.PI/2;scene.add(ground);
   box(3.4,1.6,2.2,mat(0x2b2b33),1.2,0.8,0);
   const roof=box(3.7,1.7,1.7,mat(0x3a3a44),1.2,1.7,0);roof.rotation.x=Math.PI/4;roof.scale.y=0.72;
   const pan=box(2.7,0.06,1.05,mat(0x0d1420,{r:0.3,m:0.55,e:0x0d2b55,ei:0.35}),1.2,2.0,0.62);pan.rotation.x=-Math.PI/4;
   F3.panel=pan;
-  box(0.42,0.6,0.02,mat(0xffe9a8,{e:0xffd980,ei:0.45}),1.9,0.78,1.11);
-  box(0.42,0.6,0.02,mat(0xffe9a8,{e:0xffd980,ei:0.45}),2.5,0.78,1.11);
-  box(0.52,1.02,0.14,mat(0xf2f2f5,{r:0.4}),0.25,0.6,1.18);
+  box(0.42,0.6,0.02,mat(0xffe9a8,{e:0xffd980,ei:0.25}),1.9,0.78,1.11);
+  box(0.42,0.6,0.02,mat(0xffe9a8,{e:0xffd980,ei:0.25}),2.5,0.78,1.11);
+  box(0.58,1.08,0.12,mat(0x26262e,{r:0.6}),0.25,0.6,1.15); // charcoal frame
+  box(0.52,1.02,0.14,mat(0xffffff,{r:0.35}),0.25,0.6,1.18);
   F3.led=box(0.05,0.86,0.02,mat(0x34c759,{e:0x34c759,ei:1.5}),0.03,0.6,1.26);
   box(0.2,0.28,0.1,mat(0x44444e),1.0,0.5,1.14);
   box(1.9,1.05,1.9,mat(0x26262e),-2.2,0.53,0.15);
@@ -359,14 +360,15 @@ function initFlow3D(){
   const wg=new THREE.CylinderGeometry(0.17,0.17,0.1,18),wm=mat(0x0c0c10,{r:0.6});
   [[-0.48,0.38],[0.48,0.38],[-0.48,-0.38],[0.48,-0.38]].forEach(p=>{const w=new THREE.Mesh(wg,wm);w.rotation.x=Math.PI/2;w.position.set(p[0],0.17,p[1]);car.add(w)});
   car.position.set(-2.2,0,1.3);scene.add(car);
-  box(0.14,0.3,0.08,mat(0xe9e9ee,{r:0.4}),-1.15,0.55,1.12);
-  // heat pump outdoor unit (front-right of the house)
-  box(0.6,0.62,0.32,mat(0xd6d6dc,{r:0.5}),2.9,0.31,1.9);
-  const grille=new THREE.Mesh(new THREE.CircleGeometry(0.19,24),mat(0x1c1c22,{r:0.9}));grille.position.set(2.9,0.34,2.062);scene.add(grille);
+  box(0.14,0.3,0.08,mat(0x55555e,{r:0.5}),-1.15,0.55,1.12);
+  // heat pump outdoor unit on the garage roof
+  box(0.66,0.68,0.36,mat(0x26262e,{r:0.6}),-2.6,1.49,0.4);      // charcoal frame
+  box(0.6,0.62,0.32,mat(0xffffff,{r:0.4}),-2.6,1.49,0.42);
+  const grille=new THREE.Mesh(new THREE.CircleGeometry(0.19,24),mat(0x1c1c22,{r:0.9}));grille.position.set(-2.6,1.52,0.585);scene.add(grille);
   F3.hpFan=new THREE.Group();
   {const bl=new THREE.BoxGeometry(0.3,0.04,0.015),bm=mat(0x9a9aa2,{r:0.5,e:0x9a9aa2,ei:0.15});
    for(let i=0;i<3;i++){const b=new THREE.Mesh(bl,bm);b.rotation.z=i*Math.PI/3;F3.hpFan.add(b)}}
-  F3.hpFan.position.set(2.9,0.34,2.075);scene.add(F3.hpFan);
+  F3.hpFan.position.set(-2.6,1.52,0.6);scene.add(F3.hpFan);
   const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.07,2.6,10),mat(0x3a3a42));pole.position.set(5.1,1.3,-0.4);scene.add(pole);
   box(0.9,0.07,0.07,mat(0x3a3a42),5.1,2.35,-0.4);
   const cable=(pts)=>{const c=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)));
@@ -377,7 +379,7 @@ function initFlow3D(){
     home: cable([[1.06,0.55,1.14],[1.5,0.62,1.11],[1.85,0.72,1.05]]),
     grid: cable([[1.06,0.4,1.16],[2.6,0.1,1.35],[4.0,0.4,0.6],[5.08,2.28,-0.35]]),
     ev:   cable([[0.96,0.34,1.18],[-0.2,0.07,1.45],[-1.15,0.42,1.14],[-1.62,0.14,1.35],[-2.0,0.3,1.32]]),
-    hp:   cable([[2.55,0.5,1.12],[2.78,0.16,1.5],[2.9,0.3,1.7]]),
+    hp:   cable([[0.96,0.4,1.2],[-0.5,0.12,1.42],[-1.5,0.45,1.05],[-2.35,1.25,0.6],[-2.6,1.42,0.6]]),
   };
   const tex=(()=>{const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');
     const g2=x.createRadialGradient(32,32,0,32,32,32);
@@ -388,8 +390,8 @@ function initFlow3D(){
     const grp=new THREE.Group();scene.add(grp);
     const sprites=[];
     for(let i=0;i<8;i++){
-      const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0xffffff,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true}));
-      s.scale.set(0.17,0.17,1);s.visible=false;grp.add(s);sprites.push(s);
+      const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0xffffff,blending:THREE.NormalBlending,depthWrite:false,transparent:true}));
+      s.scale.set(0.19,0.19,1);s.visible=false;grp.add(s);sprites.push(s);
     }
     F3.flows[k]={sprites,speed:0,dir:1,n:0,color:new THREE.Color(0xffffff),on:false,phase:Math.random()};
   }
@@ -440,12 +442,12 @@ function renderFlow(L){
     const setF=(k,w,color,dir)=>{const f=F3.flows[k];const a=Math.abs(w||0);
       f.on=a>50;f.speed=0.05+Math.min(0.45,a/9000);f.dir=dir||1;
       f.n=Math.max(2,Math.min(8,Math.round(a/900)+2));f.color.set(color)};
-    setF('solar',L.solar_power,0xffd60a,1);
-    setF('pw',L.battery_power,0x34c759,(L.battery_power||0)>0?-1:1);
-    setF('home',homeW,0x58a6ff,1);
-    setF('hp',hp>60?hp:0,0xff9f0a,1);
-    setF('grid',L.grid_power,(L.grid_power||0)>0?0xff453a:0x34c759,(L.grid_power||0)>0?-1:1);
-    setF('ev',ev>250?ev:0,0x58a6ff,1);
+    setF('solar',L.solar_power,0xf5a623,1);
+    setF('pw',L.battery_power,0x1fa943,(L.battery_power||0)>0?-1:1);
+    setF('home',homeW,0x0a66d0,1);
+    setF('hp',hp>60?hp:0,0xe07800,1);
+    setF('grid',L.grid_power,(L.grid_power||0)>0?0xe0302a:0x1fa943,(L.grid_power||0)>0?-1:1);
+    setF('ev',ev>250?ev:0,0x0a66d0,1);
     if(F3.led)F3.led.material.emissiveIntensity=Math.abs(L.battery_power||0)>50?1.6:0.5;
     if(F3.panel)F3.panel.material.emissiveIntensity=(L.solar_power||0)>50?0.7:0.2;
   }
