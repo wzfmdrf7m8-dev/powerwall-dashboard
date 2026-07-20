@@ -548,17 +548,17 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     console.log(`dhw: ohmeOk=${!!ohmeOk2} slots=${JSON.stringify((state.ohmeData || {}).slots || [])} now=${nowIso2} inSlot=${!!inSlot2} boosted=${state.dhwBoosted || 0}`);
     try {
       if (inSlot2 && !state.dhwBoosted) {
-        const cur = (((state.home || {}).vaillant) || {}).dhwTarget ?? 50;
-        state.dhwPrev = cur >= 58 ? (state.dhwPrev ?? 50) : cur;   // never save a boosted target as "previous"
+        const cur = (((state.home || {}).vaillant) || {}).dhwTarget ?? 45;
+        state.dhwPrev = cur >= 58 ? (state.dhwPrev ?? 45) : cur;   // never save a boosted target as "previous"
         await vaillantSetDhw(env, state, 60);
         // setpoint alone is passive — the boost forces heating now, regardless of the DHW schedule
         try { await vaillantDhwBoost(env, state, true); log.push(`hot water -> 60° + boost on (ohme slot, was ${state.dhwPrev}°)`); }
         catch (e) { log.push(`hot water -> 60°, boost failed: ${String(e).slice(0, 70)}`); }
         state.dhwBoosted = 1;
       } else if (!inSlot2 && state.dhwBoosted) {
-        await vaillantSetDhw(env, state, state.dhwPrev ?? 50);
+        await vaillantSetDhw(env, state, state.dhwPrev ?? 45);
         try { await vaillantDhwBoost(env, state, false); } catch (e) {}
-        log.push(`hot water -> ${state.dhwPrev ?? 50}°, boost off (slot ended)`);
+        log.push(`hot water -> ${state.dhwPrev ?? 45}°, boost off (slot ended)`);
         state.dhwBoosted = 0;
       }
     } catch (e) { log.push("dhw automation: " + String(e).slice(0, 100)); }
@@ -1076,7 +1076,7 @@ async function runCommand(env, state, command, value) {
   } else if (command === "dhw_ohme") {
     state.config.dhw_ohme_slots = value === "on";
     if (value !== "on" && state.dhwBoosted) {
-      try { await vaillantSetDhw(env, state, state.dhwPrev ?? 50); state.dhwBoosted = 0; log.push(`hot water restored to ${state.dhwPrev ?? 50}°`); } catch (e) {}
+      try { await vaillantSetDhw(env, state, state.dhwPrev ?? 45); state.dhwBoosted = 0; log.push(`hot water restored to ${state.dhwPrev ?? 45}°`); } catch (e) {}
     }
     log.push(`hot water in ohme slots -> ${value}`);
   } else if (command === "automation") {
