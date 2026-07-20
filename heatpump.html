@@ -40,6 +40,12 @@
 </nav>
 <h1>Heat pump</h1>
 <div class="sub" id="sub">…</div>
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+  <button onclick="cmd('vaillant_dhw_boost','on')">Boost hot water</button>
+  <button style="background:#e8e8ed;color:var(--txt)" onclick="cmd('vaillant_dhw_boost','off')">Cancel boost</button>
+  <input id="dhwT" type="number" min="35" max="65" step="1" value="50" style="width:66px">
+  <button style="background:#e8e8ed;color:var(--txt)" onclick="cmd('vaillant_dhw_temp',val('dhwT'))">Set tank target</button>
+</div>
 <div class="err" id="err"></div>
 <div class="grid" id="cards"></div>
 <div class="grid" id="zones"></div>
@@ -78,7 +84,28 @@ function render(d){
   if(v.pressure!=null) cards.push(card('Pressure',v.pressure.toFixed(1)+' bar',v.pressure>=1&&v.pressure<=2.5?'healthy':'check pressure',v.pressure>=1&&v.pressure<=2.5?'ok':'warn'));
   if(v.outdoor!=null) cards.push(card('Outdoor sensor',v.outdoor.toFixed(1)+'°',''));
   el('cards').innerHTML=cards.join('')||'<div class="sub">No heat pump data yet — add your myVAILLANT credentials (I’ll walk you through it).</div>';
-  el('zones').innerHTML=(v.zones||[]).map(z=>card(z.name,(z.temp!=null?z.temp.toFixed(1):'–')+'°',(z.target!=null?('target '+z.target.toFixed(1)+'°'):'')+(z.humidity!=null?(' · '+z.humidity.toFixed(0)+'% rh'):''))).join('');
+  el('zones').innerHTML=(v.zones||[]).map((z,i)=>`
+    <div class="card">
+      <h3>${z.name}</h3>
+      <div class="v">${z.temp!=null?z.temp.toFixed(1):'–'}°</div>
+      <div class="m">${z.target!=null?('target '+z.target.toFixed(1)+'°'):''}${z.humidity!=null?(' · '+z.humidity.toFixed(0)+'% rh'):''}</div>
+      <div style="display:flex;gap:6px;margin-top:10px;align-items:center">
+        <input id="v_${i}" type="number" step="0.5" min="5" max="30" value="${z.target!=null?z.target:20}" style="width:62px">
+        <button style="padding:6px 12px;font-size:12px" onclick="cmd('vaillant_veto','${z.index}|'+val('v_${i}'))">Veto 4h</button>
+        <button style="padding:6px 12px;font-size:12px;background:#e8e8ed;color:var(--txt)" onclick="cmd('vaillant_veto_cancel','${z.index}')">Cancel</button>
+      </div>
+    </div>`).join('');
+}
+const val=id=>document.getElementById(id).value;
+async function cmd(c,v){
+  el('err').style.color='var(--dim)';el('err').textContent='working…';
+  try{
+    const r=await fetch(`${WORKER}/cmd`,{method:'POST',headers:{'Content-Type':'application/json','x-auth':PASS},body:JSON.stringify({command:c,value:v??''})});
+    const j=await r.json();
+    el('err').style.color=j.ok?'var(--mint)':'var(--pink)';
+    el('err').textContent=j.ok?((j.log||[]).join('; ')||'done'):(j.error||'failed');
+    setTimeout(async()=>{try{render(await loadHome(PASS))}catch(e){}},5000);
+  }catch(e){el('err').style.color='var(--pink)';el('err').textContent=String(e).slice(0,120)}
 }
 async function unlock(pass){
   try{

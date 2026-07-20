@@ -43,6 +43,11 @@
 </nav>
 <h1>Network</h1>
 <div class="sub" id="sub">…</div>
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+  <button onclick="cmd('eero_speedtest','')">Run speed test</button>
+  <button style="background:#e8e8ed;color:var(--txt)" onclick="cmd('eero_guest','on')">Guest wifi on</button>
+  <button style="background:#e8e8ed;color:var(--txt)" onclick="cmd('eero_guest','off')">Guest wifi off</button>
+</div>
 <div class="err" id="err"></div>
 <div class="grid" id="cards"></div>
 <div id="devices"></div>
@@ -85,11 +90,22 @@ function render(d){
     card('Guest network',n.guest?'On':'Off',''),
   ];
   el('cards').innerHTML=cards.join('');
-  const nodes=(n.nodes||[]).map(x=>`<tr><td>${x.location||'–'}</td><td>${x.model||''}</td><td class="${x.status==='green'?'ok':'warn'}">${x.status||''}</td></tr>`).join('');
+  const nodes=(n.nodes||[]).map(x=>`<tr><td>${x.location||'–'}</td><td>${x.model||''}</td><td class="${x.status==='green'?'ok':'warn'}">${x.status||''}</td><td>${x.id?`<button style="padding:4px 10px;font-size:12px;background:#e8e8ed;color:var(--txt)" onclick="if(confirm('Reboot ${(x.location||'this eero').replace(/'/g,'')}?'))cmd('eero_reboot','${x.id}')">Reboot</button>`:''}</td></tr>`).join('');
   const devs=(n.devices||[]).map(x=>`<tr><td>${(x.name||'').slice(0,34)}</td><td>${x.ip||''}</td><td>${x.wireless?(x.band||'wifi'):'wired'}</td></tr>`).join('');
   el('devices').innerHTML=
-    (nodes?`<table style="margin-bottom:14px"><tr><th>eero</th><th>model</th><th>status</th></tr>${nodes}</table>`:'')+
+    (nodes?`<table style="margin-bottom:14px"><tr><th>eero</th><th>model</th><th>status</th><th></th></tr>${nodes}</table>`:'')+
     (devs?`<table><tr><th>device</th><th>ip</th><th>connection</th></tr>${devs}</table>`:'');
+}
+const val=id=>document.getElementById(id).value;
+async function cmd(c,v){
+  el('err').style.color='var(--dim)';el('err').textContent='working…';
+  try{
+    const r=await fetch(`${WORKER}/cmd`,{method:'POST',headers:{'Content-Type':'application/json','x-auth':PASS},body:JSON.stringify({command:c,value:v??''})});
+    const j=await r.json();
+    el('err').style.color=j.ok?'var(--mint)':'var(--pink)';
+    el('err').textContent=j.ok?((j.log||[]).join('; ')||'done'):(j.error||'failed');
+    setTimeout(async()=>{try{render(await loadHome(PASS))}catch(e){}},5000);
+  }catch(e){el('err').style.color='var(--pink)';el('err').textContent=String(e).slice(0,120)}
 }
 async function unlock(pass){
   try{

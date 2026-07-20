@@ -42,6 +42,10 @@
 </nav>
 <h1>Heating</h1>
 <div class="sub" id="sub">…</div>
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+  <button onclick="cmd('tado_presence','HOME')">Home mode</button>
+  <button style="background:#e8e8ed;color:var(--txt)" onclick="cmd('tado_presence','AWAY')">Away mode</button>
+</div>
 <div class="err" id="err"></div>
 <div class="grid" id="rooms"></div>
 
@@ -75,13 +79,29 @@ function render(d){
     (t.weather?t.weather.toLowerCase().replace(/_/g,' ')+' · ':'')+
     (t.presence?('home mode: '+t.presence.toLowerCase()+' · '):'')+'updated '+(d.generated_at||'').slice(11,16);
   const rooms=t.rooms||[];
-  el('rooms').innerHTML=rooms.map(r=>`
+  el('rooms').innerHTML=rooms.map((r,i)=>`
     <div class="card room">
       <h3>${r.name}${r.openWindow?'<span class="tag">window open</span>':''}${r.mode==='OFF'?'<span class="tag">off</span>':''}</h3>
       <div class="temp">${r.temp!=null?r.temp.toFixed(1):'–'}°</div>
       <div class="meta">${r.target!=null?('target '+r.target.toFixed(1)+'°'):'no target'}${r.humidity!=null?(' · '+r.humidity.toFixed(0)+'% rh'):''}</div>
       <div class="bar"><i style="width:${Math.min(100,r.power||0)}%"></i></div>
+      <div style="display:flex;gap:6px;margin-top:10px;align-items:center">
+        <input id="t_${i}" type="number" step="0.5" min="5" max="30" value="${r.target!=null?r.target:21}" style="width:62px">
+        <button style="padding:6px 12px;font-size:12px" onclick="cmd('tado_set','${r.id}|'+val('t_${i}'))">Set</button>
+        <button style="padding:6px 12px;font-size:12px;background:#e8e8ed;color:var(--txt)" onclick="cmd('tado_resume','${r.id}')">Auto</button>
+      </div>
     </div>`).join('')||'<div class="sub">No rooms yet — connect tado from the Energy page controls.</div>';
+}
+const val=id=>document.getElementById(id).value;
+async function cmd(c,v){
+  el('err').style.color='var(--dim)';el('err').textContent='working…';
+  try{
+    const r=await fetch(`${WORKER}/cmd`,{method:'POST',headers:{'Content-Type':'application/json','x-auth':PASS},body:JSON.stringify({command:c,value:v??''})});
+    const j=await r.json();
+    el('err').style.color=j.ok?'var(--mint)':'var(--pink)';
+    el('err').textContent=j.ok?((j.log||[]).join('; ')||'done'):(j.error||'failed');
+    setTimeout(async()=>{try{render(await loadHome(PASS))}catch(e){}},5000);
+  }catch(e){el('err').style.color='var(--pink)';el('err').textContent=String(e).slice(0,120)}
 }
 async function unlock(pass){
   try{
