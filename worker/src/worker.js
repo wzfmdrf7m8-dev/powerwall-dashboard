@@ -549,11 +549,11 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     try {
       if (inSlot2 && !state.dhwBoosted) {
         const cur = (((state.home || {}).vaillant) || {}).dhwTarget ?? 50;
-        state.dhwPrev = cur >= 60 ? (state.dhwPrev ?? 50) : cur;   // never save a boosted target as "previous"
-        await vaillantSetDhw(env, state, 65);
+        state.dhwPrev = cur >= 58 ? (state.dhwPrev ?? 50) : cur;   // never save a boosted target as "previous"
+        await vaillantSetDhw(env, state, 60);
         // setpoint alone is passive — the boost forces heating now, regardless of the DHW schedule
-        try { await vaillantDhwBoost(env, state, true); log.push(`hot water -> 65° + boost on (ohme slot, was ${state.dhwPrev}°)`); }
-        catch (e) { log.push(`hot water -> 65°, boost failed: ${String(e).slice(0, 70)}`); }
+        try { await vaillantDhwBoost(env, state, true); log.push(`hot water -> 60° + boost on (ohme slot, was ${state.dhwPrev}°)`); }
+        catch (e) { log.push(`hot water -> 60°, boost failed: ${String(e).slice(0, 70)}`); }
         state.dhwBoosted = 1;
       } else if (!inSlot2 && state.dhwBoosted) {
         await vaillantSetDhw(env, state, state.dhwPrev ?? 50);
