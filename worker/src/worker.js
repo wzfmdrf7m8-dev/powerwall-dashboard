@@ -535,8 +535,19 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     const nowIso = new Date().toISOString();
     const inSlot = ohmeOk && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso && nowIso < sl.end);
     const day = cfg.day || {};
-    if (inSlot) { await setReserve(100, "ohme slot"); await setGridCharging(true, "ohme slot"); }
-    else { await setReserve(day.reserve ?? 0, "outside ohme slots"); await setGridCharging(!!day.allow_grid_charging, "outside ohme slots"); }
+    if (inSlot) {
+      // SOC hysteresis inside the slot: charge below 80%, stop + free to export at 95%
+      const soc = (((state.hist || [])[ (state.hist || []).length - 1 ]) || {}).soc ?? 0;
+      if (state.pwSlotCharge == null) state.pwSlotCharge = soc < 95 ? 1 : 0;
+      if (soc >= 95 && state.pwSlotCharge) { state.pwSlotCharge = 0; log.push(`powerwall ${soc.toFixed(0)}% — charge released, free to export`); }
+      else if (soc < 80 && !state.pwSlotCharge) { state.pwSlotCharge = 1; log.push(`powerwall ${soc.toFixed(0)}% — charging in slot`); }
+      if (state.pwSlotCharge) { await setReserve(100, "ohme slot, charging to 95%"); await setGridCharging(true, "ohme slot"); }
+      else { await setReserve(day.reserve ?? 0, "ohme slot, battery full"); await setGridCharging(false, "ohme slot, battery full"); }
+    } else {
+      state.pwSlotCharge = null;
+      await setReserve(day.reserve ?? 0, "outside ohme slots");
+      await setGridCharging(!!day.allow_grid_charging, "outside ohme slots");
+    }
   }
   // heat the hot water tank to 65° during Ohme off-peak slots, restore after
   if (!(cfg.dhw_ohme_slots && env.MYVAILLANT_EMAIL && state.vaillantSys))
@@ -1194,9 +1205,15 @@ async function vaillantLogin(env, state) {
   const r1 = await fetch(`${VAILLANT_AUTH}/protocol/openid-connect/auth?${q}`, { redirect: "manual" });
   const cookies = (r1.headers.getSetCookie ? r1.headers.getSetCookie() : []).map((c) => c.split(";")[0]).join("; ");
   const html = await r1.text();
-  const m = html.match(new RegExp(`${VAILLANT_AUTH}/login-actions/authenticate\\?[^"]*`.replace(/[/.]/g, (c) => "\\" + c)));
-  if (!m) throw new Error("vaillant: login form not found");
-  const loginUrl = m[0].replace(/&amp;/g, "&");
+  // form action may be absolute or relative depending on Keycloak version
+  let m = html.match(/action="([^"]*login-actions\/authenticate[^"]*)"/);
+  if (!m) m = html.match(new RegExp(`(${VAILLANT_AUTH}/login-actions/authenticate\\?[^"]*)`.replace(/[/.]/g, (c) => "\\" + c)));
+  if (!m) {
+    console.log("vaillant login page (no form):", r1.status, html.slice(0, 400).replace(/\s+/g, " "));
+    throw new Error(`vaillant: login form not found (http ${r1.status})`);
+  }
+  let loginUrl = m[1].replace(/&amp;/g, "&");
+  if (!loginUrl.startsWith("http")) loginUrl = new URL(loginUrl, VAILLANT_AUTH).toString();
   const r2 = await fetch(loginUrl, {
     method: "POST", redirect: "manual",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: cookies },
@@ -1228,9 +1245,13 @@ async function vaillantToken(env, state) {
     const j = await r.json().catch(() => ({}));
     if (j.access_token) { v.access = j.access_token; v.refresh = j.refresh_token || v.refresh; v.exp = now + (j.expires_in || 300) - 30; return v.access; }
   }
-  const j = await vaillantLogin(env, state);
-  v.access = j.access_token; v.refresh = j.refresh_token; v.exp = now + (j.expires_in || 300) - 30;
-  return v.access;
+  if (v.loginFailT && now - v.loginFailT < 600) throw new Error("vaillant: login cooling down after failure");
+  try {
+    const j = await vaillantLogin(env, state);
+    v.access = j.access_token; v.refresh = j.refresh_token; v.exp = now + (j.expires_in || 300) - 30;
+    v.loginFailT = 0;
+    return v.access;
+  } catch (e) { v.loginFailT = now; throw e; }
 }
 async function fetchVaillant(env, state) {
   if (!env.MYVAILLANT_EMAIL) return { error: "myVAILLANT credentials not set" };
