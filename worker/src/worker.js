@@ -1202,7 +1202,8 @@ async function vaillantLogin(env, state) {
     redirect_uri: "enduservaillant.page.link://login",
     code_challenge_method: "S256", code_challenge: challenge,
   });
-  const r1 = await fetch(`${VAILLANT_AUTH}/protocol/openid-connect/auth?${q}`, { redirect: "manual" });
+  const bh = { "User-Agent": "okhttp/4.9.2", "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "en-GB,en;q=0.9" };
+  const r1 = await fetch(`${VAILLANT_AUTH}/protocol/openid-connect/auth?${q}`, { redirect: "manual", headers: bh });
   const cookies = (r1.headers.getSetCookie ? r1.headers.getSetCookie() : []).map((c) => c.split(";")[0]).join("; ");
   const html = await r1.text();
   // form action may be absolute or relative depending on Keycloak version
@@ -1216,7 +1217,7 @@ async function vaillantLogin(env, state) {
   if (!loginUrl.startsWith("http")) loginUrl = new URL(loginUrl, VAILLANT_AUTH).toString();
   const r2 = await fetch(loginUrl, {
     method: "POST", redirect: "manual",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: cookies },
+    headers: { ...bh, "Content-Type": "application/x-www-form-urlencoded", Cookie: cookies },
     body: new URLSearchParams({ username: env.MYVAILLANT_EMAIL, password: env.MYVAILLANT_PASSWORD, credentialId: "" }),
   });
   const loc = r2.headers.get("Location") || "";
