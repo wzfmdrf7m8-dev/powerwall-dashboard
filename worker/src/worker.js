@@ -1255,6 +1255,25 @@ async function vaillantToken(env, state) {
     const j = await r.json().catch(() => ({}));
     if (j.access_token) { v.access = j.access_token; v.refresh = j.refresh_token || v.refresh; v.exp = now + (j.expires_in || 300) - 30; return v.access; }
   }
+  // fallback: tokens minted by the vaillant-login GitHub Action (non-CF IPs beat the WAF)
+  try {
+    const o = await env.PW.get("vailtok.json");
+    if (o) {
+      const jt = JSON.parse(await o.text());
+      if (jt.t && jt.t !== v.usedT) {
+        v.usedT = jt.t;
+        if (jt.refresh) {
+          const r = await fetch(`${VAILLANT_AUTH}/protocol/openid-connect/token`, {
+            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ grant_type: "refresh_token", client_id: "myvaillant", refresh_token: jt.refresh }),
+          });
+          const j2 = await r.json().catch(() => ({}));
+          if (j2.access_token) { v.access = j2.access_token; v.refresh = j2.refresh_token || jt.refresh; v.exp = now + (j2.expires_in || 300) - 30; v.loginFailT = 0; return v.access; }
+        }
+        if (jt.access && (jt.exp || 0) > now) { v.access = jt.access; v.refresh = jt.refresh; v.exp = jt.exp; v.loginFailT = 0; return v.access; }
+      }
+    }
+  } catch (e) {}
   if (v.loginFailT && now - v.loginFailT < 600) throw new Error("vaillant: login cooling down after failure");
   try {
     const j = await vaillantLogin(env, state);
