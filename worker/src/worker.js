@@ -1149,9 +1149,16 @@ async function tadoToken(env, state) {
   throw new Error("tado token: " + lastErr);
 }
 async function fetchTado(env, state) {
+  // tado free tier allows only ~100 API calls/day (since 2025) — be frugal:
+  // zoneStates every refresh, zones daily, weather 6-hourly, presence 2-hourly, 2h backoff on 429
+  const nowS = Date.now() / 1000;
+  const T = (state.tadoCache = state.tadoCache || {});
+  if (T.backoffT && nowS < T.backoffT)
+    throw new Error("tado rate-limited, retrying after " + new Date(T.backoffT * 1000).toISOString().slice(11, 16) + "Z");
   const tok = await tadoToken(env, state);
   const get = async (p) => {
     const r = await fetch("https://my.tado.com/api/v2" + p, { headers: { Authorization: `Bearer ${tok}` } });
+    if (r.status === 429) { T.backoffT = nowS + 7200; throw new Error(`tado ${p} 429 — paused 2h (free tier: 100 calls/day)`); }
     if (!r.ok) throw new Error(`tado ${p} ${r.status}`);
     return r.json();
   };
@@ -1160,9 +1167,11 @@ async function fetchTado(env, state) {
     state.tadoHome = (((me || {}).homes || [])[0] || {}).id;
   }
   const h = state.tadoHome;
-  const [zones, zoneStates, weather, homeState] = await Promise.all([
-    get(`/homes/${h}/zones`), get(`/homes/${h}/zoneStates`), get(`/homes/${h}/weather`), get(`/homes/${h}/state`),
-  ]);
+  if (!T.zones || nowS - (T.zonesT || 0) > 86400) { T.zones = await get(`/homes/${h}/zones`); T.zonesT = nowS; }
+  const zoneStates = await get(`/homes/${h}/zoneStates`);
+  if (!T.weather || nowS - (T.weatherT || 0) > 21600) { T.weather = await get(`/homes/${h}/weather`); T.weatherT = nowS; }
+  if (!T.homeState || nowS - (T.homeStateT || 0) > 7200) { T.homeState = await get(`/homes/${h}/state`); T.homeStateT = nowS; }
+  const zones = T.zones, weather = T.weather, homeState = T.homeState;
   const zs = (zoneStates || {}).zoneStates || {};
   const rooms = (zones || []).filter((z) => z.type === "HEATING").map((z) => {
     const s = zs[z.id] || {};
@@ -1415,7 +1424,10 @@ async function fetchOura(env) {
 
 async function refreshHome(env, state, log) {
   const home = (state.home = state.home || {});
-  try { home.tado = await fetchTado(env, state); } catch (e) { home.tado = { ...(home.tado || {}), error: String(e).slice(0, 140) }; }
+  if (Date.now() / 1000 - (state.lastTado || 0) > 1740) {
+    state.lastTado = Date.now() / 1000;
+    try { home.tado = await fetchTado(env, state); } catch (e) { home.tado = { ...(home.tado || {}), error: String(e).slice(0, 140) }; }
+  }
   try { home.vaillant = await fetchVaillant(env, state); } catch (e) { home.vaillant = { ...(home.vaillant || {}), error: String(e).slice(0, 140) }; }
   // overnight bedroom temperature sampling (22:00-09:00) for the sleep correlation
   try {
