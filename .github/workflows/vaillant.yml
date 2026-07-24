@@ -2,9 +2,14 @@ name: vaillant-login
 # Vaillant's WAF blocks logins from Cloudflare Worker IPs (403). This action signs in
 # from GitHub's runners instead and drops fresh tokens into R2 for the worker to adopt.
 on:
-  schedule:
-    - cron: '17 */6 * * *'
   workflow_dispatch:
+    inputs:
+      code:
+        description: 'auth code from a browser login (optional)'
+        required: false
+      verifier:
+        description: 'PKCE verifier matching the code (optional)'
+        required: false
 jobs:
   login:
     runs-on: ubuntu-latest
@@ -13,6 +18,8 @@ jobs:
         env:
           MYVAILLANT_EMAIL: ${{ secrets.MYVAILLANT_EMAIL }}
           MYVAILLANT_PASSWORD: ${{ secrets.MYVAILLANT_PASSWORD }}
+          IN_CODE: ${{ inputs.code }}
+          IN_VERIFIER: ${{ inputs.verifier }}
         run: |
           pip -q install requests
           python - <<'EOF'
@@ -25,35 +32,39 @@ jobs:
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-GB,en;q=0.9"}
 
-          verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
-          challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-
           s = requests.Session()
-          r1 = s.get(f"{AUTH}/protocol/openid-connect/auth", params={
-              "response_type": "code", "client_id": "myvaillant",
-              "redirect_uri": REDIR, "code_challenge_method": "S256",
-              "code_challenge": challenge,
-          }, headers=UA)
-          r1.raise_for_status()
-          m = re.search(r'action="([^"]*login-actions/authenticate[^"]*)"', r1.text)
-          assert m, f"login form not found (http {r1.status_code})"
-          url = m.group(1).replace("&amp;", "&")
-          if not url.startswith("http"):
-              from urllib.parse import urljoin
-              url = urljoin(AUTH + "/", url)
 
-          r2 = s.post(url, data={
-              "username": os.environ["MYVAILLANT_EMAIL"],
-              "password": os.environ["MYVAILLANT_PASSWORD"],
-              "credentialId": "",
-          }, headers=UA, allow_redirects=False)
-          loc = r2.headers.get("Location", "")
-          m2 = re.search(r"[?&]code=([^&]+)", loc)
-          assert m2, f"no auth code (http {r2.status_code}) — check credentials"
+          # a code minted in the user's browser skips the (WAF-blocked) form login
+          code, verifier = os.environ.get("IN_CODE", ""), os.environ.get("IN_VERIFIER", "")
+          if not code:
+            verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+            challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+            r1 = s.get(f"{AUTH}/protocol/openid-connect/auth", params={
+                "response_type": "code", "client_id": "myvaillant",
+                "redirect_uri": REDIR, "code_challenge_method": "S256",
+                "code_challenge": challenge,
+            }, headers=UA)
+            r1.raise_for_status()
+            m = re.search(r'action="([^"]*login-actions/authenticate[^"]*)"', r1.text)
+            assert m, f"login form not found (http {r1.status_code})"
+            url = m.group(1).replace("&amp;", "&")
+            if not url.startswith("http"):
+                from urllib.parse import urljoin
+                url = urljoin(AUTH + "/", url)
+
+            r2 = s.post(url, data={
+                "username": os.environ["MYVAILLANT_EMAIL"],
+                "password": os.environ["MYVAILLANT_PASSWORD"],
+                "credentialId": "",
+            }, headers=UA, allow_redirects=False)
+            loc = r2.headers.get("Location", "")
+            m2 = re.search(r"[?&]code=([^&]+)", loc)
+            assert m2, f"no auth code (http {r2.status_code}) — check credentials"
+            code = m2.group(1)
 
           r3 = s.post(f"{AUTH}/protocol/openid-connect/token", data={
               "grant_type": "authorization_code", "client_id": "myvaillant",
-              "code": m2.group(1), "code_verifier": verifier, "redirect_uri": REDIR,
+              "code": code, "code_verifier": verifier, "redirect_uri": REDIR,
           }, headers=UA)
           j = r3.json()
           assert j.get("access_token"), f"token exchange failed: {list(j.keys())}"
