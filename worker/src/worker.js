@@ -536,11 +536,11 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     const inSlot = ohmeOk && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso && nowIso < sl.end);
     const day = cfg.day || {};
     if (inSlot) {
-      // SOC hysteresis inside the slot: charge below 80%, stop + free to export at 95%
+      // SOC hysteresis inside the slot: charge below 50%, stop + free to export at 95%
       const soc = (((state.hist || [])[ (state.hist || []).length - 1 ]) || {}).soc ?? 0;
       if (state.pwSlotCharge == null) state.pwSlotCharge = soc < 95 ? 1 : 0;
       if (soc >= 95 && state.pwSlotCharge) { state.pwSlotCharge = 0; log.push(`powerwall ${soc.toFixed(0)}% — charge released, free to export`); }
-      else if (soc < 80 && !state.pwSlotCharge) { state.pwSlotCharge = 1; log.push(`powerwall ${soc.toFixed(0)}% — charging in slot`); }
+      else if (soc < 50 && !state.pwSlotCharge) { state.pwSlotCharge = 1; log.push(`powerwall ${soc.toFixed(0)}% — charging in slot`); }
       if (state.pwSlotCharge) { await setReserve(100, "ohme slot, charging to 95%"); await setGridCharging(true, "ohme slot"); }
       else { await setReserve(day.reserve ?? 0, "ohme slot, battery full"); await setGridCharging(true, "always enabled"); }
     } else {
