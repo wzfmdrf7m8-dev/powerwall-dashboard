@@ -542,11 +542,11 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
       if (soc >= 95 && state.pwSlotCharge) { state.pwSlotCharge = 0; log.push(`powerwall ${soc.toFixed(0)}% — charge released, free to export`); }
       else if (soc < 80 && !state.pwSlotCharge) { state.pwSlotCharge = 1; log.push(`powerwall ${soc.toFixed(0)}% — charging in slot`); }
       if (state.pwSlotCharge) { await setReserve(100, "ohme slot, charging to 95%"); await setGridCharging(true, "ohme slot"); }
-      else { await setReserve(day.reserve ?? 0, "ohme slot, battery full"); await setGridCharging(false, "ohme slot, battery full"); }
+      else { await setReserve(day.reserve ?? 0, "ohme slot, battery full"); await setGridCharging(true, "always enabled"); }
     } else {
       state.pwSlotCharge = null;
       await setReserve(day.reserve ?? 0, "outside ohme slots");
-      await setGridCharging(!!day.allow_grid_charging, "outside ohme slots");
+      await setGridCharging(true, "always enabled");
     }
   }
   // heat the hot water tank to 65° during Ohme off-peak slots, restore after
@@ -580,7 +580,7 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
       const t = hhmm(), inWin = cw.start < cw.end ? (t >= cw.start && t < cw.end) : (t >= cw.start || t < cw.end);
       const tgt = inWin ? cw : (cfg.day || {});
       await setReserve(tgt.reserve ?? 0, inWin ? "cheap window" : "daytime");
-      await setGridCharging(!!tgt.allow_grid_charging, inWin ? "cheap window" : "daytime");
+      await setGridCharging(true, "always enabled");
     }
   }
 }
