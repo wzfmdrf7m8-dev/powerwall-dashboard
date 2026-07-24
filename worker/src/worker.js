@@ -114,6 +114,7 @@ async function loadState(env) {
   // one-time migration (2026-07-20): hot water to 65° during Ohme slots (requested)
   if (!state.mig_dhw1) { state.config.dhw_ohme_slots = true; state.mig_dhw1 = 1; }
   if (!state.mig_dhw2) { state.dhwBoosted = 0; state.mig_dhw2 = 1; } // re-arm after adding boost support
+  if (!state.mig_pw1) { state.pwSlotCharge = null; state.mig_pw1 = 1; } // re-evaluate slot charging with 50% start line
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -538,7 +539,7 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     if (inSlot) {
       // SOC hysteresis inside the slot: charge below 50%, stop + free to export at 95%
       const soc = (((state.hist || [])[ (state.hist || []).length - 1 ]) || {}).soc ?? 0;
-      if (state.pwSlotCharge == null) state.pwSlotCharge = soc < 95 ? 1 : 0;
+      if (state.pwSlotCharge == null) state.pwSlotCharge = soc < 50 ? 1 : 0; // start charging only below 50%
       if (soc >= 95 && state.pwSlotCharge) { state.pwSlotCharge = 0; log.push(`powerwall ${soc.toFixed(0)}% — charge released, free to export`); }
       else if (soc < 50 && !state.pwSlotCharge) { state.pwSlotCharge = 1; log.push(`powerwall ${soc.toFixed(0)}% — charging in slot`); }
       if (state.pwSlotCharge) { await setReserve(100, "ohme slot, charging to 95%"); await setGridCharging(true, "ohme slot"); }
