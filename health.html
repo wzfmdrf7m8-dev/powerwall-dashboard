@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Battery health</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Battery">
+<meta name="theme-color" content="#f5f5f7">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#f5f5f7;--card:#fff;--edge:rgba(0,0,0,.05);--txt:#1d1d1f;--dim:#6e6e73;
+    --mint:#34c759;--sun:#ff9500;--cyan:#007aff;--pink:#ff3b30}
+  *{box-sizing:border-box;margin:0}
+  html,body{overflow-x:hidden;max-width:100vw}
+  body{color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+    padding:24px 20px;max-width:1150px;margin:auto;background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased}
+  @media(max-width:600px){body{padding:14px 10px}}
+  nav{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+  nav a{text-decoration:none;color:var(--txt);background:#fff;border:1px solid #e5e5ea;border-radius:99px;padding:6px 16px;font-size:13px;font-weight:600}
+  nav a.on{background:#1d1d1f;color:#fff;border-color:#1d1d1f}
+  h1{font-size:22px;font-weight:700;margin-bottom:2px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:16px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px;margin-bottom:18px}
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:18px;padding:16px 18px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  .card h3{font-size:13px;font-weight:600;color:var(--dim)}
+  .card .v{font-size:30px;font-weight:700;letter-spacing:-.02em}
+  .card .m{font-size:12px;color:var(--dim)}
+  .ok{color:var(--mint)} .warn{color:var(--pink)} .mid{color:var(--sun)}
+  .bar{height:9px;background:#ececf0;border-radius:5px;overflow:hidden;margin:10px 0 4px}
+  .bar i{display:block;height:9px;border-radius:5px}
+  .pw{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f0f0f3}
+  .pw:last-child{border-bottom:0}
+  .pwc{width:34px;height:52px;border:2px solid #c9c9d0;border-radius:5px;position:relative;flex:0 0 auto;background:#f5f5f7}
+  .pwc:before{content:'';position:absolute;top:-5px;left:9px;width:14px;height:4px;background:#c9c9d0;border-radius:2px 2px 0 0}
+  .pwc i{position:absolute;left:2px;right:2px;bottom:2px;border-radius:3px;background:var(--mint)}
+  .err{color:var(--pink);font-size:13px;margin:10px 0}
+  #overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:10}
+  #overlay .box{background:#fff;border:1px solid var(--edge);padding:32px;border-radius:22px;width:320px;text-align:center}
+  input,button{font:inherit;border-radius:10px;border:1px solid #d2d2d7;padding:8px 12px}
+  button{background:#0071e3;color:#fff;border:0;font-weight:600;cursor:pointer;border-radius:980px;padding:8px 16px}
+</style>
+</head>
+<body>
+<nav>
+  <a href="./">⚡ Energy</a><a href="heating">🌡 Heating</a><a href="heatpump">♨️ Heat pump</a><a href="network">📶 Network</a><a href="octopus">🐙 Octopus</a><a href="oura">💍 Oura</a><a class="on" href="health">🔋 Battery</a>
+</nav>
+<h1>Battery health</h1>
+<div class="sub" id="sub">…</div>
+<div class="err" id="err"></div>
+<div class="grid" id="cards"></div>
+
+<div class="card" style="margin-bottom:18px">
+  <h3 style="margin-bottom:10px">PER POWERWALL</h3>
+  <div id="units"></div>
+  <div class="m" style="margin-top:8px" id="unitNote"></div>
+</div>
+
+<div class="card" style="margin-bottom:18px">
+  <h3 style="margin-bottom:8px">USABLE CAPACITY OVER TIME</h3>
+  <div id="degNote" class="m" style="margin-bottom:8px">–</div>
+  <canvas id="capChart" height="130"></canvas>
+</div>
+
+<div id="overlay" style="display:none"><div class="box">
+  <h1 style="font-size:18px;margin-bottom:12px">Unlock</h1>
+  <input id="pw" type="password" placeholder="Password" style="width:100%;margin-bottom:10px">
+  <button onclick="unlock()">Open</button>
+  <div class="err" id="pwerr"></div>
+</div></div>
+
+<script>
+const WORKER='https://powerwall-api.randlefamily.com';
+const el=id=>document.getElementById(id);
+let PASS=null,CH=null;
+async function deriveKey(pass,salt){
+  const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:200000,hash:'SHA-256'},km,{name:'AES-CBC',length:256},false,['decrypt']);
+}
+async function loadData(pass){
+  const res=await fetch(`${WORKER}/data?_=${Date.now()}`,{cache:'no-store'});
+  if(!res.ok) throw new Error('no data yet');
+  const raw=Uint8Array.from(atob((await res.text()).trim()),c=>c.charCodeAt(0));
+  const key=await deriveKey(pass,raw.slice(0,16));
+  const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+const kwh=w=>w==null?'–':(w/1000).toFixed(2)+' kWh';
+function card(h,v,m,cls){return `<div class="card"><h3>${h}</h3><div class="v ${cls||''}">${v}</div><div class="m">${m||''}</div></div>`}
+function socColor(p){return p>=50?'#34c759':(p>=20?'#ff9500':'#ff3b30')}
+function render(d){
+  const L=d.live||{},si=d.site_info||{};
+  el('err').textContent='';
+  const soc=L.percentage_charged||0;
+  const cap=L.total_pack_energy||0;          // current usable full capacity (Wh)
+  const left=L.energy_left!=null?L.energy_left:(cap*soc/100);
+  const count=si.battery_count||1;
+  // nameplate: PW3 = 13.5 kWh usable each; site nameplate_energy if present
+  const namePer=13500;
+  const nameTotal=si.nameplate_energy||namePer*count;
+  const soh=nameTotal>0?Math.max(0,Math.min(100,100*cap/nameTotal)):null;
+  const deg=soh!=null?(100-soh):null;
+
+  el('sub').textContent=[count+' × Powerwall',
+    si.installation_date?('installed '+si.installation_date.slice(0,10)):'',
+    'updated '+((d.generated_at||'').slice(11,16))].filter(Boolean).join(' · ');
+
+  const cards=[];
+  cards.push(card('Total charge',soc.toFixed(0)+'%',kwh(left)+' of '+kwh(cap),socColor(soc)==='#34c759'?'ok':(soc>=20?'mid':'warn')));
+  cards.push(card('Usable capacity',kwh(cap),'across '+count+' unit'+(count>1?'s':'')));
+  if(soh!=null) cards.push(card('State of health',soh.toFixed(1)+'%','vs '+kwh(nameTotal)+' when new',soh>=90?'ok':(soh>=80?'mid':'warn')));
+  if(deg!=null) cards.push(card('Degradation',deg.toFixed(1)+'%',deg<10?'healthy':'monitor',deg<10?'ok':'mid'));
+  cards.push(card('Reserve floor',(si.backup_reserve_percent??'–')+'%',(si.default_real_mode||'').replace(/_/g,' ')));
+  cards.push(card('Grid',(L.grid_status||'').replace(/Systems?/,'').replace(/_/g,' ')||'–',L.storm_mode_active?'storm watch on':''));
+  el('cards').innerHTML=cards.join('');
+
+  // per-Powerwall: the cloud API reports the pack as one — units share the same SoC.
+  // show each unit's share of stored energy and its slice of usable capacity.
+  const perLeft=left/count, perCap=cap/count;
+  let html='';
+  for(let i=0;i<count;i++){
+    html+=`<div class="pw">
+      <div class="pwc"><i style="height:${Math.max(3,soc*0.46).toFixed(1)}px;background:${socColor(soc)}"></i></div>
+      <div style="flex:1">
+        <div style="font-weight:600">Powerwall ${i+1}</div>
+        <div class="bar"><i style="width:${soc.toFixed(0)}%;background:${socColor(soc)}"></i></div>
+        <div class="m">${soc.toFixed(0)}% · ${kwh(perLeft)} of ${kwh(perCap)}</div>
+      </div>
+    </div>`;
+  }
+  el('units').innerHTML=html;
+  el('unitNote').textContent='Powerwalls in a stack charge and discharge together, so the cloud API reports one shared state of charge; figures above are each unit’s equal share. Per-cell balance is managed internally by each unit.';
+
+  // capacity-over-time chart from the daily health samples
+  const H=(d.pw_health||[]).filter(x=>x.cap>0);
+  if(CH)CH.destroy();
+  if(H.length<2){
+    el('degNote').textContent='Capacity logging has just started — the fade curve builds up over the coming weeks (one point per day, taken near full charge for accuracy).';
+    el('capChart').style.display='none';
+  }else{
+    el('capChart').style.display='';
+    const first=H[0].cap, lastC=H[H.length-1].cap;
+    const dropPct=first>0?(100*(first-lastC)/first):0;
+    const days=Math.max(1,(new Date(H[H.length-1].d)-new Date(H[0].d))/864e5);
+    const perYear=dropPct/days*365;
+    el('degNote').innerHTML=`Usable capacity <b>${kwh(lastC)}</b> today vs <b>${kwh(first)}</b> on ${H[0].d}`+
+      (dropPct>0.2?` — down ${dropPct.toFixed(1)}% over ${Math.round(days)} days (~${perYear.toFixed(1)}%/yr)`:' — no measurable fade yet');
+    CH=new Chart(el('capChart'),{type:'line',data:{labels:H.map(x=>x.d.slice(5)),datasets:[{
+      label:'Usable kWh',data:H.map(x=>Math.round(x.cap/10)/100),borderColor:'#34c759',backgroundColor:'rgba(52,199,89,.12)',
+      fill:true,tension:.25,pointRadius:0,borderWidth:2}]},
+      options:{animation:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' kWh'}}},
+        scales:{y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,callback:v=>v+' kWh'}},
+          x:{ticks:{maxTicksLimit:9,color:'#6e6e73'},grid:{display:false}}}}});
+  }
+}
+async function unlock(pass){
+  try{
+    const p=pass!==undefined?pass:el('pw').value;
+    render(await loadData(p));
+    PASS=p; localStorage.setItem('pw_pass',p); el('overlay').style.display='none';
+    setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},60*1000);
+  }catch(e){
+    el('overlay').style.display='flex';
+    el('pwerr').textContent=e.name==='OperationError'?'Wrong password':e.message;
+  }
+}
+window.addEventListener('load',()=>{
+  const saved=localStorage.getItem('pw_pass');
+  if(saved) unlock(saved); else el('overlay').style.display='flex';
+});
+el('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
+</script>
+</body>
+</html>
