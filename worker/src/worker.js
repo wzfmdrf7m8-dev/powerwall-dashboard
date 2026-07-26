@@ -685,6 +685,20 @@ async function pollCycle(env, state, opts = {}) {
     ...(inIoSlot ? { io: 1 } : {}),
     ...(state.ohmeData && !state.ohmeData.error ? { ev: (state.ohmeData.power || {}).watts || 0 } : {}),
   });
+  // daily battery-health sample: capacity fade needs total_pack_energy over time.
+  // record the day's peak observed capacity + energy (near full = most accurate).
+  {
+    const dKey = localMinuteISO().slice(0, 10);
+    const H = (state.pwHealth = state.pwHealth || {});
+    const cap = live.total_pack_energy || 0, left = live.energy_left || 0, soc = live.percentage_charged || 0;
+    if (cap > 0) {
+      const rec = (H[dKey] = H[dKey] || { d: dKey, cap: 0, left: 0, socMax: 0 });
+      if (cap > rec.cap) rec.cap = cap;              // best (fullest) capacity reading of the day
+      if (soc > rec.socMax) { rec.socMax = soc; rec.left = left; }
+      const ks = Object.keys(H).sort();
+      for (const k of ks.slice(0, Math.max(0, ks.length - 800))) delete H[k]; // ~2 years
+    }
+  }
   // permanent daily ledger: exact off-peak/peak accumulation, minute by minute
   {
     const t = hhmm();
@@ -916,6 +930,7 @@ async function pollCycle(env, state, opts = {}) {
     octopus: state.octopus ? { ...state.octopus, daily: (state.octopus.daily || []).slice(-60) } : null,
     ohme: state.ohmeData || null,
     hp: state.hp || null,
+    pw_health: Object.values(state.pwHealth || {}).sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-400),
     source: "cloudflare-worker",
   };
   const enc = await encryptBundle(state, bundle);
