@@ -354,7 +354,7 @@ async function fetchOctopus(env, state) {
           d.nExp = (d.nExp || 0) + 1;
         }
       }
-      out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: rates.slice(-200) };
+      out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: rates.slice(kind === "export" ? -450 : -200) };
     }
   }
   // last-2-days accuracy: Octopus's REST feeds lag (imports ~a day, exports worse).
