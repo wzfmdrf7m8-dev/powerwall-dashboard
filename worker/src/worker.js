@@ -1124,6 +1124,12 @@ async function tadoPollToken(env, state, log) {
     state.tado = { access: j.access_token, exp: Date.now() / 1000 + (j.expires_in || 599) - 60, refresh: j.refresh_token };
     try { await env.PW.put("tado_rt.txt", j.refresh_token); } catch (e) {}
     delete state.tadoDevice;
+    // fresh token — clear any rate-limit backoff/error and force an immediate refresh
+    if (state.tadoCache) state.tadoCache.backoffT = 0;
+    state.lastTado = 0;
+    if (state.home && state.home.tado) delete state.home.tado.error;
+    try { state.home = state.home || {}; state.home.tado = await fetchTado(env, state); state.lastTado = Date.now() / 1000;
+      await env.PW.put("home.enc", await encryptBundle(state, { generated_at: localOffsetISO().slice(0, 19), ...state.home })); } catch (e) {}
     log.push("tado connected ✓");
   }
 }
