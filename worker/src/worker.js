@@ -116,6 +116,7 @@ async function loadState(env) {
   if (!state.mig_dhw2) { state.dhwBoosted = 0; state.mig_dhw2 = 1; } // re-arm after adding boost support
   if (!state.mig_pw1) { state.pwSlotCharge = null; state.mig_pw1 = 1; } // re-evaluate slot charging with 50% start line
   if (!state.mig_agex1) { state.config.export_agile_from = "2026-07-26"; state.lastOcto = 0; state.mig_agex1 = 1; } // Agile Outgoing live from 26 Jul; reprice now
+  if (!state.mig_agex2) { state.lastOcto = 0; state.mig_agex2 = 1; } // bridge now unconditional — reprice again
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -313,7 +314,9 @@ async function fetchOctopus(env, state) {
         // win over the stale flat agreement; self-retires once the feed shows AGILE.
         try {
           const agFrom = (state.config || {}).export_agile_from;
-          if (agFrom && !((tariff || "").includes("AGILE"))) {
+          // unconditional for 14 days after the switch: even if the account feed lists the
+          // agile agreement, its start date may lag reality; direct rates always win
+          if (agFrom && Date.now() - Date.parse(agFrom) < 14 * 864e5) {
             if (!state.agileExpCode || Date.now() / 1000 - (state.agileExpCodeT || 0) > 86400) {
               const prods = await getAll("https://api.octopus.energy/v1/products/", { page_size: "250" });
               const p = prods.filter((x) => x.direction === "EXPORT" && /AGILE/i.test(x.code) && !x.available_to)
@@ -323,8 +326,10 @@ async function fetchOctopus(env, state) {
             }
             if (state.agileExpCode) {
               const agRates = await getAll(`https://api.octopus.energy/v1/products/${state.agileExpProduct}/electricity-tariffs/${state.agileExpCode}/standard-unit-rates/`,
-                { period_from: agFrom > start ? agFrom : start, period_to: rateEnd, page_size: "1500" });
+                { period_from: agFrom, period_to: rateEnd, page_size: "1500" });
               if (agRates.length) rates = agRates.concat(rates);
+              console.log(`agile bridge: ${state.agileExpCode} -> ${agRates.length} rates from ${agFrom}`);
+              out.bridge = { code: state.agileExpCode, n: agRates.length };
             }
           }
         } catch (e) {}
@@ -451,7 +456,8 @@ async function fetchOctopus(env, state) {
           }
         }
       }
-    } catch (e) { /* no Home Mini / telemetry hiccup — REST catches up */ }
+      for (const k of needExp) if (daily[k]) console.log(`exp repriced ${k}: ${(daily[k].expKwh || 0).toFixed(1)} kWh -> ${(daily[k].expEarn || 0).toFixed(0)}p`);
+    } catch (e) { console.log("telemetry reprice failed: " + String(e).slice(0, 120)); }
   }
   // per-day standing charge from the dated tariff schedule
   for (const k of Object.keys(daily)) {
