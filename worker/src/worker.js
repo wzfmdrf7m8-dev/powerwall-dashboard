@@ -625,6 +625,11 @@ async function pushTariff(env, state, sid, log) {
     },
   };
   await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/time_of_use_settings`, { tou_settings: { tariff_content_v2: content } });
+  state.tariffPushed = {
+    t: localOffsetISO().slice(0, 19),
+    off, offP: Math.round(offP * 10000) / 100, onP: Math.round(onP * 10000) / 100,
+    sell: Array.from({ length: 48 }, (_, h) => Math.round(sellRates["R" + String(h).padStart(2, "0")] * 10000) / 100),
+  };
   log.push(`tariff synced: ${off.length} cheap window(s), sell avg ${avg.toFixed(1)}p`);
   console.log(`tariff synced: off=${JSON.stringify(off)} sellAvg=${avg.toFixed(2)}p`);
 }
@@ -1080,6 +1085,7 @@ async function pollCycle(env, state, opts = {}) {
     ohme: state.ohmeData || null,
     hp: state.hp || null,
     pw_health: Object.values(state.pwHealth || {}).sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-400),
+    tariff_push: state.tariffPushed || null,
     source: "cloudflare-worker",
   };
   const enc = await encryptBundle(state, bundle);
