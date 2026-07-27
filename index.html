@@ -243,6 +243,10 @@
     <button onclick="cmd('follow_ohme','on')">Charge Powerwall during Ohme slots: ON</button>
     <button class="sec" onclick="cmd('follow_ohme','off')">OFF</button>
     <button onclick="cmd('dhw_ohme','on')">Hot water 60° in Ohme slots: ON</button>
+  <button onclick="cmd('tariff_sync','on')">Tariff sync: ON</button>
+  <button class="sec" onclick="cmd('tariff_sync','off')">OFF</button>
+  <button class="sec" onclick="cmd('tariff_push','')">Push tariff now</button>
+  <button class="sec" onclick="if(confirm('Restore the original Tesla app tariff and disable sync?'))cmd('tariff_restore','')">Restore original</button>
     <button class="sec" onclick="cmd('dhw_ohme','off')">OFF</button>
     <button class="sec" onclick="cmd('tado_auth','')">Connect tado</button>
     <input id="eeroEmail" type="email" placeholder="eero account email" style="width:180px"><button class="sec" onclick="cmd('eero_login',val('eeroEmail'))">Connect eero</button>
@@ -903,6 +907,7 @@ function render(d){
   if(a.enabled&&a.cheap_window&&a.cheap_window.enabled) html+='<span class="pill">cheap window '+a.cheap_window.start+'–'+a.cheap_window.end+'</span>';
   html+='<span class="pill">Powerwall follows Ohme slots: '+(a.follow_ohme_slots?'on':'off')+'</span>';
   html+='<span class="pill">Hot water 60° in Ohme slots: '+(a.dhw_ohme_slots?'on':'off')+'</span>';
+  html+='<span class="pill">Tesla tariff sync: '+((a.tariff_sync&&a.tariff_sync.enabled)?'on':'off')+'</span>';
   el('autos').innerHTML=html;
   el('lastlog').textContent=(d.log&&d.log.length)?('Last run: '+d.log.join('; ')):'Last run: no changes made';
 
