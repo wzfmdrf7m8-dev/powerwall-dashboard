@@ -727,6 +727,17 @@ async function pollCycle(env, state, opts = {}) {
     ...(inIoSlot ? { io: 1 } : {}),
     ...(state.ohmeData && !state.ohmeData.error ? { ev: (state.ohmeData.power || {}).watts || 0 } : {}),
   });
+  // fast release: the main automation runs on a ~4-min cadence, but at full grid-charge
+  // rate that overshoots the 95% stop line — so check the stop condition every minute.
+  if (state.pwSlotCharge === 1 && (live.percentage_charged || 0) >= 95) {
+    try {
+      const day = (state.config || {}).day || {};
+      await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/backup`, { backup_reserve_percent: Math.round(day.reserve ?? 0) });
+      state.pwSlotCharge = 0;
+      if (state.siteInfo) state.siteInfo.backup_reserve_percent = Math.round(day.reserve ?? 0);
+      log.push(`powerwall ${(live.percentage_charged || 0).toFixed(0)}% — charge released`);
+    } catch (e) { log.push("fast release: " + String(e).slice(0, 80)); }
+  }
   // daily battery-health sample: capacity fade needs total_pack_energy over time.
   // record the day's peak observed capacity + energy (near full = most accurate).
   {
