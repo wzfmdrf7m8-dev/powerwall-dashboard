@@ -60,6 +60,13 @@
   <div class="tag" style="margin-top:8px">Today and yesterday are live-priced from the Home Mini and re-settle when Octopus publishes final data. Import includes the EV circuit. Net = import + standing − export.</div>
 </div>
 
+<div class="card" id="tariffCard" hidden>
+  <h3 style="font-size:13px;font-weight:600;color:var(--dim);margin-bottom:4px">RATES ON THE POWERWALL</h3>
+  <div class="sub" id="tSub" style="margin-bottom:8px"></div>
+  <div id="tWindows" style="font-size:13px;margin-bottom:10px"></div>
+  <div style="overflow-x:auto"><table id="tTbl"></table></div>
+</div>
+
 <div id="overlay" style="display:none"><div class="box">
   <h1 style="font-size:18px;margin-bottom:12px">Unlock</h1>
   <input id="pw" type="password" placeholder="Password" style="width:100%;margin-bottom:10px">
@@ -87,6 +94,7 @@ const gbp=p=>'£'+(p/100).toFixed(2);
 function render(d){
   LAST=d;
   el('err').textContent='';
+  renderTariff(d);
   el('sub').textContent='updated '+new Date(d.generated_at).toLocaleString();
   const n=parseInt(el('days').value,10);
   const rows=(((d.octopus)||{}).daily||[]).slice(-n).slice().reverse();
@@ -114,6 +122,25 @@ function render(d){
       <td>${tExp.toFixed(0)}</td><td class="ok">${gbp(tExpC)}</td>
       <td class="hidesm">${gbp(tStand)}</td>
       <td class="${tNet<0?'ok':''}">${tNet<0?'−':''}${gbp(Math.abs(tNet))}</td></tr>`;
+}
+function renderTariff(d){
+  const tp=d.tariff_push;
+  if(!tp){el('tariffCard').hidden=true;return}
+  el('tariffCard').hidden=false;
+  el('tSub').textContent='pushed to Tesla at '+tp.t.replace('T',' ')+' · buy: '+tp.offP.toFixed(1)+'p cheap / '+tp.onP.toFixed(1)+'p peak';
+  const mm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+  el('tWindows').innerHTML='Cheap import windows: '+(tp.off||[]).map(w=>'<b>'+mm(w.s)+'–'+(w.e===1440?'00:00':mm(w.e))+'</b>').join(' · ');
+  const inOff=m=>(tp.off||[]).some(w=>m>=w.s&&m<w.e);
+  const sorted=[...(tp.sell||[])].sort((a,b)=>b-a);
+  const hi=sorted[4]??Infinity; // top 5 sell slots
+  let rows='';
+  for(let h=0;h<48;h++){
+    const m=h*30, buyOff=inOff(m), sell=tp.sell[h];
+    rows+='<tr><td>'+mm(m)+'</td>'+
+      '<td class="'+(buyOff?'ok':'')+'">'+(buyOff?tp.offP.toFixed(1):tp.onP.toFixed(1))+'</td>'+
+      '<td class="'+(sell>=hi?'ok':'')+'" style="'+(sell>=hi?'font-weight:700':'')+'">'+sell.toFixed(2)+'</td></tr>';
+  }
+  el('tTbl').innerHTML='<tr><th>from</th><th>buy p/kWh</th><th>sell p/kWh</th></tr>'+rows;
 }
 async function unlock(pass){
   try{
