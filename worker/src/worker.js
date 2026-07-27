@@ -950,7 +950,9 @@ async function pollCycle(env, state, opts = {}) {
       const ts = ((state.config || {}).tariff_sync) || {};
       if (ts.enabled) {
         const sig = localMinuteISO().slice(0, 10) + JSON.stringify(tariffIntervals(state).off);
-        if (state.tariffSig !== sig && now - (state.lastTariffPush || 0) > 1800) {
+        // 5-min throttle: a fresh Ohme grant minutes after a push (e.g. the midnight
+        // rewrite) must reach the Powerwall while the slot is still running
+        if (state.tariffSig !== sig && now - (state.lastTariffPush || 0) > 300) {
           await pushTariff(env, state, sid, log);
           state.tariffSig = sig; state.lastTariffPush = now;
         }
