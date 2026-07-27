@@ -292,13 +292,16 @@ async function fetchOctopus(env, state) {
       }
       // price each period under the agreement that was actually in force (the
       // tariff changed twice this year — statements: Go 5.71/29.06 → 4.00/27.46 → 5.62/29.84)
+      // rates fetched up to +2 days: Agile publishes next-day prices ~16:30, and we
+      // want tonight's export half-hours priced correctly the moment they're live.
       const winEnd = chunkEnd || new Date().toISOString();
+      const rateEnd = chunkEnd || new Date(Date.now() + 2 * 864e5).toISOString();
       for (const ag of mp.agreements || []) {
         const af = ag.valid_from || "2000", at = ag.valid_to || "9999";
-        if (at <= start || af >= winEnd) continue; // agreement outside our pull window
+        if (at <= start || af >= rateEnd) continue; // agreement outside our pull window
         const code = ag.tariff_code;
         const product = code.split("-").slice(2, -1).join("-");
-        const params = { period_from: af > start ? af : start, period_to: at < winEnd ? at : winEnd, page_size: "1500" };
+        const params = { period_from: af > start ? af : start, period_to: at < rateEnd ? at : rateEnd, page_size: "1500" };
         rates = rates.concat(await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${code}/standard-unit-rates/`, params));
         if (kind === "import")
           standing = standing.concat(await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${code}/standing-charges/`, params));
@@ -366,7 +369,7 @@ async function fetchOctopus(env, state) {
       const expRates = ((out.export || {}).rates) || [];
       const dayKeys = [0, 1].map((n) => localMinuteISO(new Date(Date.now() - n * 864e5)).slice(0, 10));
       const needImp = dayKeys.filter((k) => !daily[k] || (daily[k].nImp || 0) < 46);
-      const needExp = dayKeys.filter((k) => !daily[k] || (daily[k].nExp || 0) < 46);
+      const needExp = dayKeys.slice(); // always re-price the last 2 days' export against the latest rates
       if (needImp.length || needExp.length) {
         const devId = await krakenDeviceId(env, state);
         const s = new Date(Date.parse(londonDayStartISO(new Date(Date.now() - 864e5))) - 1800e3);
@@ -386,7 +389,15 @@ async function fetchOctopus(env, state) {
           }
           return (dayMinCache[dy] = m);
         };
-        const blank = (k) => (daily[k] = daily[k] || { d: k, impKwh: 0, impCost: 0, offKwh: 0, peakKwh: 0, expKwh: 0, expEarn: 0 });
+        const expDayAvg = (dy) => {
+          let sum = 0, n = 0;
+          for (const r of expRates) {
+            const f = Date.parse(r.valid_from || 0);
+            if (localMinuteISO(new Date(f)).slice(0, 10) === dy) { sum += r.value_inc_vat; n++; }
+          }
+          return n ? sum / n : 12;
+        };
+                const blank = (k) => (daily[k] = daily[k] || { d: k, impKwh: 0, impCost: 0, offKwh: 0, peakKwh: 0, expKwh: 0, expEarn: 0 });
         for (const k of needImp) { const dd = blank(k); dd.impKwh = dd.impCost = dd.offKwh = dd.peakKwh = 0; dd.telemetry = 1; }
         for (const k of needExp) { const dd = blank(k); dd.expKwh = dd.expEarn = 0; dd.telemetry = 1; }
         let prevReg = null;
@@ -411,7 +422,7 @@ async function fetchOctopus(env, state) {
             if (prevReg != null && reg > prevReg && needExp.includes(dy)) {
               const ek = (reg - prevReg) / 1000;
               const dd = daily[dy];
-              dd.expKwh += ek; dd.expEarn += ek * (rateAtEpoch(expRates, ts) ?? 12);
+              dd.expKwh += ek; dd.expEarn += ek * (rateAtEpoch(expRates, ts) ?? expDayAvg(dy));
             }
             prevReg = reg;
           }
