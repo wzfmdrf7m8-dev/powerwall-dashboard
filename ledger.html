@@ -47,6 +47,13 @@
 <div class="sub" id="sub">…</div>
 <div class="err" id="err"></div>
 
+<div class="card" id="tariffCard" hidden>
+  <h3 style="font-size:13px;font-weight:600;color:var(--dim);margin-bottom:4px">RATES ON THE POWERWALL</h3>
+  <div class="sub" id="tSub" style="margin-bottom:8px"></div>
+  <div id="tWindows" style="font-size:13px;margin-bottom:10px"></div>
+  <div style="overflow-x:auto"><table id="tTbl"></table></div>
+</div>
+
 <div class="card">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
     <h3 style="font-size:13px;font-weight:600;color:var(--dim);flex:1">DAILY METERED TOTALS</h3>
@@ -58,13 +65,6 @@
   </div>
   <div style="overflow-x:auto"><table id="tbl"></table></div>
   <div class="tag" style="margin-top:8px">Today and yesterday are live-priced from the Home Mini and re-settle when Octopus publishes final data. Import includes the EV circuit. Net = import + standing − export.</div>
-</div>
-
-<div class="card" id="tariffCard" hidden>
-  <h3 style="font-size:13px;font-weight:600;color:var(--dim);margin-bottom:4px">RATES ON THE POWERWALL</h3>
-  <div class="sub" id="tSub" style="margin-bottom:8px"></div>
-  <div id="tWindows" style="font-size:13px;margin-bottom:10px"></div>
-  <div style="overflow-x:auto"><table id="tTbl"></table></div>
 </div>
 
 <div id="overlay" style="display:none"><div class="box">
