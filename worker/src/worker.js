@@ -115,6 +115,7 @@ async function loadState(env) {
   if (!state.mig_dhw1) { state.config.dhw_ohme_slots = true; state.mig_dhw1 = 1; }
   if (!state.mig_dhw2) { state.dhwBoosted = 0; state.mig_dhw2 = 1; } // re-arm after adding boost support
   if (!state.mig_pw1) { state.pwSlotCharge = null; state.mig_pw1 = 1; } // re-evaluate slot charging with 50% start line
+  if (!state.mig_agex1) { state.config.export_agile_from = "2026-07-26"; state.lastOcto = 0; state.mig_agex1 = 1; } // Agile Outgoing live from 26 Jul; reprice now
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -305,6 +306,28 @@ async function fetchOctopus(env, state) {
         rates = rates.concat(await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${code}/standard-unit-rates/`, params));
         if (kind === "import")
           standing = standing.concat(await getAll(`https://api.octopus.energy/v1/products/${product}/electricity-tariffs/${code}/standing-charges/`, params));
+      }
+      if (kind === "export") {
+        // Bridge for account-feed lag after a switch to Agile Outgoing: the public
+        // products API has the rates with no account involved. Prepending makes them
+        // win over the stale flat agreement; self-retires once the feed shows AGILE.
+        try {
+          const agFrom = (state.config || {}).export_agile_from;
+          if (agFrom && !((tariff || "").includes("AGILE"))) {
+            if (!state.agileExpCode || Date.now() / 1000 - (state.agileExpCodeT || 0) > 86400) {
+              const prods = await getAll("https://api.octopus.energy/v1/products/", { page_size: "250" });
+              const p = prods.filter((x) => x.direction === "EXPORT" && /AGILE/i.test(x.code) && !x.available_to)
+                             .sort((a, b) => (a.available_from < b.available_from ? 1 : -1))[0];
+              const region = (tariff || "").trim().slice(-1) || "A";
+              if (p) { state.agileExpProduct = p.code; state.agileExpCode = `E-1R-${p.code}-${region}`; state.agileExpCodeT = Date.now() / 1000; }
+            }
+            if (state.agileExpCode) {
+              const agRates = await getAll(`https://api.octopus.energy/v1/products/${state.agileExpProduct}/electricity-tariffs/${state.agileExpCode}/standard-unit-rates/`,
+                { period_from: agFrom > start ? agFrom : start, period_to: rateEnd, page_size: "1500" });
+              if (agRates.length) rates = agRates.concat(rates);
+            }
+          }
+        } catch (e) {}
       }
       if (kind === "import") {
         out.standing_now = rateAtEpoch(standing, Date.now()) ?? STANDING_FALLBACK;
