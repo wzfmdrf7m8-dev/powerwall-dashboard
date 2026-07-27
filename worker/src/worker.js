@@ -119,6 +119,7 @@ async function loadState(env) {
   if (!state.mig_agex2) { state.lastOcto = 0; state.mig_agex2 = 1; } // bridge now unconditional — reprice again
   if (!state.mig_pw2) { state.pwSlotCharge = null; state.mig_pw2 = 1; } // re-evaluate with fill-to-95 rule
   if (!state.mig_pw3) { state.pwSlotCharge = null; state.mig_pw3 = 1; } // enter<95 / stop@95 / restart<50
+  if (!state.mig_ts1) { state.config.tariff_sync = { enabled: true, offpeak: 5.9, peak: 31.33 }; state.mig_ts1 = 1; }
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -544,6 +545,90 @@ async function vaillantSetDhw(env, state, temp) {
   });
   if (!r.ok && r.status !== 204) throw new Error(`dhw set ${r.status}: ${(await r.text()).slice(0, 80)}`);
 }
+/* ---------------- tesla tariff sync ----------------
+   Buy side: IO Go off-peak window + currently granted Ohme slots at the off-peak
+   rate, peak elsewhere. Sell side: today's 48 Agile Outgoing half-hours.
+   Rewritten daily and whenever Ohme's granted slots change. */
+function tariffIntervals(state) {
+  // half-hour marks for the current London day
+  const marks = new Array(48).fill(false);
+  for (let h = 0; h < 48; h++) { const m = h * 30; if (m >= 1410 || m < 330) marks[h] = true; } // 23:30-05:30
+  const base = Date.parse(londonDayStartISO(new Date()));
+  for (const sl of ((state.ohmeData || {}).slots) || []) {
+    const sMs = Date.parse(sl.start), eMs = Date.parse(sl.end);
+    if (!sMs || !eMs) continue;
+    for (let h = 0; h < 48; h++) {
+      const hs = base + h * 1800e3;
+      if (sMs < hs + 1800e3 && eMs > hs) marks[h] = true;
+    }
+  }
+  const off = []; let run = null;
+  for (let h = 0; h < 48; h++) {
+    if (marks[h]) { if (!run) run = { s: h * 30, e: h * 30 + 30 }; else run.e = h * 30 + 30; }
+    else if (run) { off.push(run); run = null; }
+  }
+  if (run) off.push(run);
+  const on = []; let cur = 0;
+  for (const x of off) { if (x.s > cur) on.push({ s: cur, e: x.s }); cur = x.e; }
+  if (cur < 1440) on.push({ s: cur, e: 1440 });
+  return { off, on };
+}
+function touPeriods(intervals) {
+  return { periods: intervals.map((iv) => ({
+    fromDayOfWeek: 0, toDayOfWeek: 6,
+    fromHour: Math.floor(iv.s / 60), fromMinute: iv.s % 60,
+    toHour: Math.floor(iv.e / 60) % 24, toMinute: iv.e % 60,
+  })) };
+}
+async function pushTariff(env, state, sid, log) {
+  const cfgT = ((state.config || {}).tariff_sync) || {};
+  const offP = (cfgT.offpeak ?? 5.9) / 100, onP = (cfgT.peak ?? 31.33) / 100;
+  const expRates = (((state.octopus || {}).export) || {}).rates || [];
+  if (!expRates.length) { log.push("tariff sync: no export rates yet"); return; }
+  // one-time backup of the app-configured plan
+  if (!state.tariffBackedUp) {
+    try {
+      const si = await tesla(env, state, "GET", `/api/1/energy_sites/${sid}/site_info`);
+      const cur = si.tariff_content_v2 || si.tariff_content;
+      if (cur) { await env.PW.put("tariff_backup.json", JSON.stringify(cur)); state.tariffBackedUp = 1; }
+    } catch (e) {}
+  }
+  const { off, on } = tariffIntervals(state);
+  const base = Date.parse(londonDayStartISO(new Date()));
+  const sellAll = expRates.filter((r) => true);
+  let avg = 0, nAvg = 0;
+  for (let h = 0; h < 48; h++) { const v = rateAtEpoch(sellAll, base + h * 1800e3 + 900e3); if (v != null) { avg += v; nAvg++; } }
+  avg = nAvg ? avg / nAvg : 12;
+  const sellRates = {}, sellPeriods = {};
+  for (let h = 0; h < 48; h++) {
+    const k = "R" + String(h).padStart(2, "0");
+    const v = rateAtEpoch(sellAll, base + h * 1800e3 + 900e3) ?? avg;
+    sellRates[k] = Math.round(v * 10) / 1000; // p -> GBP, 3dp
+    const m = h * 30;
+    sellPeriods[k] = touPeriods([{ s: m, e: m + 30 }]);
+  }
+  const season = { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31 };
+  const content = {
+    version: 1, monthly_minimum_bill: 0, min_applicable_demand: 0, max_applicable_demand: 0, monthly_charges: 0,
+    utility: "Octopus Energy", code: "IOGO-AGILE-SYNC", name: "IO Go buy + Agile sell (auto-sync)", currency: "GBP",
+    daily_charges: [{ name: "Charge", amount: 0 }], daily_demand_charges: {},
+    demand_charges: { ALL: { rates: { ALL: 0 } }, AllYear: { rates: {} } },
+    energy_charges: { ALL: { rates: { ALL: 0 } }, AllYear: { rates: { OFF_PEAK: offP, ON_PEAK: onP } } },
+    seasons: { AllYear: { ...season, tou_periods: { OFF_PEAK: touPeriods(off), ON_PEAK: touPeriods(on) } } },
+    sell_tariff: {
+      min_applicable_demand: 0, monthly_minimum_bill: 0, monthly_charges: 0, max_applicable_demand: 0,
+      utility: "Octopus Energy", code: "AGILE-OUTGOING", name: "Agile Outgoing (auto-sync)", currency: "GBP",
+      daily_charges: [{ name: "Charge", amount: 0 }], daily_demand_charges: {},
+      demand_charges: { ALL: { rates: { ALL: 0 } }, AllYear: { rates: {} } },
+      energy_charges: { ALL: { rates: { ALL: 0 } }, AllYear: { rates: sellRates } },
+      seasons: { AllYear: { ...season, tou_periods: sellPeriods } },
+    },
+  };
+  await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/time_of_use_settings`, { tou_settings: { tariff_content_v2: content } });
+  log.push(`tariff synced: ${off.length} cheap window(s), sell avg ${avg.toFixed(1)}p`);
+  console.log(`tariff synced: off=${JSON.stringify(off)} sellAvg=${avg.toFixed(2)}p`);
+}
+
 async function vaillantDhwBoost(env, state, on) {
   const tok = await vaillantToken(env, state);
   const base = (state.vaillantCtrl === "vrc700" ? VAILLANT_API.replace("end-user-app-api/v1", "vrc700/v1") : VAILLANT_API)
@@ -855,6 +940,17 @@ async function pollCycle(env, state, opts = {}) {
       await applyAutomation(env, state, sid, state.siteInfo, log);
       if (log.length) { state.siteInfo = await tesla(env, state, "GET", `/api/1/energy_sites/${sid}/site_info`); state.lastLog = log; }
     } catch (e) { log.push("automation error: " + String(e).slice(0, 120)); }
+    // tesla tariff sync — repush when the day rolls over or granted slots change
+    try {
+      const ts = ((state.config || {}).tariff_sync) || {};
+      if (ts.enabled) {
+        const sig = localMinuteISO().slice(0, 10) + JSON.stringify(tariffIntervals(state).off);
+        if (state.tariffSig !== sig && now - (state.lastTariffPush || 0) > 1800) {
+          await pushTariff(env, state, sid, log);
+          state.tariffSig = sig; state.lastTariffPush = now;
+        }
+      }
+    } catch (e) { log.push("tariff sync: " + String(e).slice(0, 120)); console.log("tariff sync failed: " + String(e).slice(0, 200)); }
   }
   // daily energy counters refresh fast (5 min) so today's totals track NetZero/Tesla;
   // the heavier self-heal work below stays on the 30-min cadence
@@ -1153,6 +1249,21 @@ async function runCommand(env, state, command, value) {
   } else if (command === "follow_ohme") {
     state.config.follow_ohme_slots = value === "on";
     log.push(`follow ohme slots -> ${value}`);
+  } else if (command === "tariff_sync") {
+    state.config.tariff_sync = state.config.tariff_sync || {};
+    state.config.tariff_sync.enabled = value === "on";
+    if (value === "on") { state.tariffSig = null; log.push("tariff sync on — pushing within ~5 min"); }
+    else log.push("tariff sync off — re-pick your plan in the Tesla app, or use Restore");
+  } else if (command === "tariff_push") {
+    await pushTariff(env, state, await siteId(env, state), log);
+    state.lastTariffPush = Date.now() / 1000;
+  } else if (command === "tariff_restore") {
+    const o = await env.PW.get("tariff_backup.json");
+    if (!o) throw new Error("no tariff backup stored");
+    await tesla(env, state, "POST", `/api/1/energy_sites/${await siteId(env, state)}/time_of_use_settings`,
+      { tou_settings: { tariff_content_v2: JSON.parse(await o.text()) } });
+    if (state.config.tariff_sync) state.config.tariff_sync.enabled = false;
+    log.push("original tariff restored, sync disabled");
   } else if (command === "dhw_ohme") {
     state.config.dhw_ohme_slots = value === "on";
     if (value !== "on" && state.dhwBoosted) {
