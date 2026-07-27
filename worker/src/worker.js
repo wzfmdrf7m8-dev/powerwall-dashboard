@@ -117,6 +117,7 @@ async function loadState(env) {
   if (!state.mig_pw1) { state.pwSlotCharge = null; state.mig_pw1 = 1; } // re-evaluate slot charging with 50% start line
   if (!state.mig_agex1) { state.config.export_agile_from = "2026-07-26"; state.lastOcto = 0; state.mig_agex1 = 1; } // Agile Outgoing live from 26 Jul; reprice now
   if (!state.mig_agex2) { state.lastOcto = 0; state.mig_agex2 = 1; } // bridge now unconditional — reprice again
+  if (!state.mig_pw2) { state.pwSlotCharge = null; state.mig_pw2 = 1; } // re-evaluate with fill-to-95 rule
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -577,11 +578,11 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     const inSlot = ohmeOk && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso && nowIso < sl.end);
     const day = cfg.day || {};
     if (inSlot) {
-      // SOC hysteresis inside the slot: charge below 50%, stop + free to export at 95%
+      // fill the battery in every slot: charge whenever below 93%, stop + free to export at 95%
       const soc = (((state.hist || [])[ (state.hist || []).length - 1 ]) || {}).soc ?? 0;
-      if (state.pwSlotCharge == null) state.pwSlotCharge = soc < 50 ? 1 : 0; // start charging only below 50%
+      if (state.pwSlotCharge == null) state.pwSlotCharge = soc < 93 ? 1 : 0;
       if (soc >= 95 && state.pwSlotCharge) { state.pwSlotCharge = 0; log.push(`powerwall ${soc.toFixed(0)}% — charge released, free to export`); }
-      else if (soc < 50 && !state.pwSlotCharge) { state.pwSlotCharge = 1; log.push(`powerwall ${soc.toFixed(0)}% — charging in slot`); }
+      else if (soc < 93 && !state.pwSlotCharge) { state.pwSlotCharge = 1; log.push(`powerwall ${soc.toFixed(0)}% — charging in slot`); }
       if (state.pwSlotCharge) { await setReserve(100, "ohme slot, charging to 95%"); await setGridCharging(true, "ohme slot"); }
       else { await setReserve(day.reserve ?? 0, "ohme slot, battery full"); await setGridCharging(true, "always enabled"); }
     } else {
