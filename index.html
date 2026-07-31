@@ -528,12 +528,15 @@ function initFlow3D(){
     const night=s.indexOf('NIGHT')>=0;
     const rain=/RAIN|DRIZZLE|THUNDER/.test(s),snow=/SNOW/.test(s),fog=/FOG|MIST/.test(s);
     const cloudy=/CLOUD|FOG|MIST|RAIN|DRIZZLE|THUNDER|SNOW/.test(s);
-    k.sunOn=!night;k.moonOn=night;
+    // heavy cloud, rain, snow or fog puts the sun and moon behind the overcast;
+    // only a partly-cloudy sky still shows them
+    const heavy=cloudy&&!/PARTLY/.test(s);
+    k.sunOn=!night&&!heavy;k.moonOn=night&&!heavy;
     k.cloudTarget=cloudy?(/PARTLY/.test(s)?0.45:0.9):0.05;
     k.wetTarget=(rain||snow)?1:0;
     k.snow=snow;
     k.pMat.color.setHex(snow?0xf2f6ff:0x9fc6ff);
-    k.pMat.size=snow?0.1:0.05;
+    k.pMat.size=snow?0.1:0.07;
     k.speed=snow?1.2:7;
     scene.fog.near=fog?3.5:10;scene.fog.far=fog?12:17;
   };
