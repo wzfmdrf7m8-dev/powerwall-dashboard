@@ -521,9 +521,9 @@ function initFlow3D(){
   /* ---- sky conditions, driven by the tado weather state ---- */
   const SKY=new THREE.Vector3(-4.3,4.55,-2.4);
   const sunGrp=new THREE.Group();sunGrp.position.copy(SKY);scene.add(sunGrp);
-  sunGrp.add(new THREE.Mesh(new THREE.SphereGeometry(0.38,20,16),new THREE.MeshBasicMaterial({color:0xffd97a})));
-  {const h=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0xffc247,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0.85}));
-   h.scale.set(2.7,2.7,1);sunGrp.add(h);}
+  const sunBall=new THREE.Mesh(new THREE.SphereGeometry(0.38,20,16),new THREE.MeshBasicMaterial({color:0xffd97a}));sunGrp.add(sunBall);
+  const sunHalo=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0xffc247,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0.85}));
+  sunHalo.scale.set(2.7,2.7,1);sunGrp.add(sunHalo);
   const moonGrp=new THREE.Group();moonGrp.position.copy(SKY);scene.add(moonGrp);
   moonGrp.add(new THREE.Mesh(new THREE.SphereGeometry(0.29,20,16),new THREE.MeshBasicMaterial({color:0xdfe4f5})));
   {const h=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0x8fa6d8,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0.55}));
@@ -556,17 +556,45 @@ function initFlow3D(){
   const pGeo=new THREE.BufferGeometry();pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
   const pMat=new THREE.LineBasicMaterial({color:0x9fc6ff,transparent:true,opacity:0,depthWrite:false});
   const precip=new THREE.LineSegments(pGeo,pMat);scene.add(precip);
-  F3.sky={sunGrp,moonGrp,clouds,precip,pMat,pPos,pVel,PN,seed,L,TOP,cloud:0,wet:0,
+  F3.sky={sunGrp,moonGrp,sunBall,sunHalo,SKY,clouds,precip,pMat,pPos,pVel,PN,seed,L,TOP,cloud:0,wet:0,
           sunOn:true,moonOn:false,cloudTarget:0.06,wetTarget:0,snow:false,snowPrev:false,speed:6.5};
+  // tado reports the sky condition, not whether the sun is up - it still says SUN
+  // at half nine at night. Work out day and night from the real solar elevation.
+  const LAT=53.39, LON=-2.55;   // Warrington
+  const solarElev=(date)=>{
+    const rad=Math.PI/180,deg=180/Math.PI;
+    const n=date.getTime()/86400000+2440587.5-2451545.0;
+    const Lm=(280.460+0.9856474*n)%360;
+    const g=((357.528+0.9856003*n)%360)*rad;
+    const lam=(Lm+1.915*Math.sin(g)+0.020*Math.sin(2*g))*rad;
+    const eps=(23.439-0.0000004*n)*rad;
+    const dec=Math.asin(Math.sin(eps)*Math.sin(lam));
+    const ra=Math.atan2(Math.cos(eps)*Math.sin(lam),Math.cos(lam));
+    const gmst=(18.697374558+24.06570982441908*n)%24;
+    const lst=((((gmst*15+LON)%360)+360)%360)*rad;
+    const la=LAT*rad,ha=lst-ra;
+    return Math.asin(Math.sin(la)*Math.sin(dec)+Math.cos(la)*Math.cos(dec)*Math.cos(ha))*deg;
+  };
+  F3.updateSun=()=>{
+    const k=F3.sky;if(!k)return;
+    const e=solarElev(new Date());
+    k.elev=e;k.night=e<-0.833;
+    k.sunOn=!k.night&&!k.heavy;k.moonOn=k.night&&!k.heavy;
+    // drop and warm the sun as it comes down to the horizon
+    const f=Math.max(0,Math.min(1,e/45)),warm=1-f;
+    k.sunGrp.position.y=k.SKY.y-(1-f)*2.2;
+    k.sunBall.material.color.setRGB(1,0.85-warm*0.30,0.48-warm*0.34);
+    k.sunHalo.material.color.setRGB(1,0.76-warm*0.32,0.28-warm*0.20);
+    k.sunHalo.material.opacity=0.85-warm*0.25;
+  };
   F3.setWx=(state)=>{
     const s=String(state||'').toUpperCase(),k=F3.sky;if(!k)return;
-    const night=s.indexOf('NIGHT')>=0;
     const rain=/RAIN|DRIZZLE|THUNDER/.test(s),snow=/SNOW/.test(s),fog=/FOG|MIST/.test(s);
     const cloudy=/CLOUD|FOG|MIST|RAIN|DRIZZLE|THUNDER|SNOW/.test(s);
     // heavy cloud, rain, snow or fog puts the sun and moon behind the overcast;
     // only a partly-cloudy sky still shows them
     const heavy=cloudy&&!/PARTLY/.test(s);
-    k.sunOn=!night&&!heavy;k.moonOn=night&&!heavy;
+    k.heavy=heavy;F3.updateSun();
     k.cloudTarget=cloudy?(/PARTLY/.test(s)?0.45:0.9):0.05;
     k.wetTarget=(rain||snow)?1:0;
     k.snow=snow;
@@ -596,6 +624,7 @@ function initFlow3D(){
       });
     }
     if(F3.hpFan)F3.hpFan.rotation.z+=dt*((F3.flows.hp&&F3.flows.hp.on)?7:0.4);
+    if(F3.sky&&T-(F3.sky.sunT||0)>30){F3.sky.sunT=T;F3.updateSun()}
     if(F3.sky){const k=F3.sky,g=Math.min(1,dt*2);
       k.sunGrp.visible=k.sunOn;k.moonGrp.visible=k.moonOn;
       k.cloud+=(k.cloudTarget-k.cloud)*g;
