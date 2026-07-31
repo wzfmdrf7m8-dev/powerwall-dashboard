@@ -287,7 +287,7 @@ function renderWx(h){
   const parts=[];
   if(t.outside!=null) parts.push(t.outside.toFixed(1)+'° outside');
   if(t.weather) parts.push(String(t.weather).toLowerCase().replace(/_/g,' '));
-  if(t.solar!=null) parts.push('sun '+Math.round(t.solar)+'%');
+  if(t.solar!=null) parts.push('solar '+Math.round(t.solar)+'%');
   wbox.textContent=(WXICON[t.weather]||'🌡')+'  '+parts.join('  ·  ');
 }
 // /home is rebuilt every 5 min server-side, so no point pulling it every 30s
