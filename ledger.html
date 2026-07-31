@@ -28,6 +28,11 @@
   th:first-child,td:first-child{text-align:left}
   th{color:var(--dim);font-weight:600;font-size:12px;position:sticky;top:0;background:#fff}
   tr.tot td{font-weight:700;border-top:2px solid #e5e5ea;border-bottom:0}
+  tr.now td{background:#fff4d6}
+  tr.now td:first-child{box-shadow:inset 3px 0 0 var(--sun);font-weight:700}
+  .nowtag{font-size:10px;color:var(--sun);font-weight:700;letter-spacing:.03em}
+  #tNow{font-size:14px;margin-bottom:10px;padding:8px 10px;background:#fff4d6;border-radius:10px}
+  #tNow b{font-variant-numeric:tabular-nums}
   .ok{color:var(--mint)} .warn{color:var(--pink)}
   .tag{font-size:10px;color:var(--dim)}
   .err{color:var(--pink);font-size:13px;margin:10px 0}
@@ -51,6 +56,7 @@
   <h3 style="font-size:13px;font-weight:600;color:var(--dim);margin-bottom:4px">RATES ON THE POWERWALL</h3>
   <div class="sub" id="tSub" style="margin-bottom:8px"></div>
   <div id="tWindows" style="font-size:13px;margin-bottom:10px"></div>
+  <div id="tNow"></div>
   <div style="overflow-x:auto"><table id="tTbl"></table></div>
 </div>
 
@@ -133,14 +139,20 @@ function renderTariff(d){
   const inOff=m=>(tp.off||[]).some(w=>m>=w.s&&m<w.e);
   const sorted=[...(tp.sell||[])].sort((a,b)=>b-a);
   const hi=sorted[4]??Infinity; // top 5 sell slots
+  // which half-hour we are actually in, in London time rather than device time
+  const lon=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
+  const cur=Math.floor(((+lon.slice(0,2))*60+(+lon.slice(3,5)))/30);
+  const endLbl=e=>e>=1440?'00:00':mm(e);
   let rows='';
   for(let h=0;h<48;h++){
-    const m=h*30, buyOff=inOff(m), sell=tp.sell[h];
-    rows+='<tr><td>'+mm(m)+'</td>'+
+    const m=h*30, buyOff=inOff(m), sell=tp.sell[h], isNow=h===cur;
+    rows+='<tr class="'+(isNow?'now':'')+'"><td>'+mm(m)+(isNow?' <span class="nowtag">now</span>':'')+'</td>'+
       '<td class="'+(buyOff?'ok':'')+'">'+(buyOff?tp.offP.toFixed(1):tp.onP.toFixed(1))+'</td>'+
       '<td class="'+(sell>=hi?'ok':'')+'" style="'+(sell>=hi?'font-weight:700':'')+'">'+sell.toFixed(2)+'</td></tr>';
   }
   el('tTbl').innerHTML='<tr><th>from</th><th>buy p/kWh</th><th>sell p/kWh</th></tr>'+rows;
+  const cs=tp.sell[cur];
+  el('tNow').innerHTML='Now '+mm(cur*30)+'–'+endLbl(cur*30+30)+' · buy <b>'+(inOff(cur*30)?tp.offP.toFixed(1):tp.onP.toFixed(1))+'p</b> · sell <b>'+(cs==null?'—':cs.toFixed(2))+'p</b>';
 }
 async function unlock(pass){
   try{
