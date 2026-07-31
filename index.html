@@ -366,14 +366,14 @@ function initFlow3D(){
   renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
   const scene=new THREE.Scene();
   scene.background=new THREE.Color(0x15151b);
-  scene.fog=new THREE.Fog(0x15151b,10,17);
+  scene.fog=new THREE.Fog(0x15151b,13,25);
   const cam=new THREE.PerspectiveCamera(33,1.66,0.1,60);
-  cam.position.set(5.4,4.4,7.6);
+  cam.position.set(7.7,6.7,10.1);
   scene.add(new THREE.HemisphereLight(0x93a7ff,0x0c0c12,0.95));
   const sun=new THREE.DirectionalLight(0xffffff,0.95);sun.position.set(4,8,5);scene.add(sun);
   const mat=(c,o={})=>new THREE.MeshStandardMaterial({color:c,roughness:o.r??0.85,metalness:o.m??0.08,emissive:o.e??0x000000,emissiveIntensity:o.ei??1});
   const box=(w,h,d,m,x,y,z)=>{const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);b.position.set(x,y,z);scene.add(b);return b};
-  const ground=new THREE.Mesh(new THREE.CircleGeometry(15,48),new THREE.MeshStandardMaterial({color:0x101016,roughness:1}));
+  const ground=new THREE.Mesh(new THREE.CircleGeometry(20,48),new THREE.MeshStandardMaterial({color:0x101016,roughness:1}));
   ground.rotation.x=-Math.PI/2;scene.add(ground);
   // brick walls
   const brickTex=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d');
@@ -383,8 +383,9 @@ function initFlow3D(){
     x.strokeStyle='#d8cfc2';x.lineWidth=2;
     for(let r=0;r<=8;r++){x.beginPath();x.moveTo(0,r*16);x.lineTo(128,r*16);x.stroke()}
     for(let r=0;r<8;r++)for(let b=0;b<5;b++){const bx=((r%2)*16+b*32)%160;x.beginPath();x.moveTo(bx,r*16);x.lineTo(bx,r*16+16);x.stroke()}
-    const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(2.4,1.2);return t})();
-  box(3.4,1.6,2.2,new THREE.MeshStandardMaterial({map:brickTex,roughness:0.92}),1.2,0.8,0);
+    const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(3.2,2.3);return t})();
+  const XC=1.8, ZC=-0.3;
+  box(4.6,2.9,2.8,new THREE.MeshStandardMaterial({map:brickTex,roughness:0.92}),XC,1.45,ZC);
   // tiled roof
   const tileTex=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d');
     x.fillStyle='#463a36';x.fillRect(0,0,128,128);
@@ -392,45 +393,45 @@ function initFlow3D(){
       x.fillStyle=['#54443f','#4c3e39','#5a4a44'][(r+tI)%3];
       x.fillRect((tI*22+off)%132-4,r*16,20,14);
       x.fillStyle='rgba(0,0,0,.35)';x.fillRect((tI*22+off)%132-4,r*16+12,20,3)}
-    const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(3,1.6);return t})();
+    const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(4,2);return t})();
   // Proper gable roof: two pitch slabs plus triangular gable ends, eaves
   // overhanging the brickwork. This was previously a cube rotated 45 degrees,
   // which left the lower half of the diamond poking out past the walls.
-  const EAVE=1.62, RIDGE=2.5, OVER=1.3;
+  const EAVE=2.92, RIDGE=4.04, OVER=1.6;
   const PITCH=Math.atan2(RIDGE-EAVE,OVER);
   const SLOPE=Math.hypot(RIDGE-EAVE,OVER)+0.06;
   const tileMat=new THREE.MeshStandardMaterial({map:tileTex,roughness:0.9});
-  const pitchGeo=new THREE.BoxGeometry(3.72,0.07,SLOPE);
+  const pitchGeo=new THREE.BoxGeometry(4.92,0.07,SLOPE);
   const pitchZ=new THREE.Mesh(pitchGeo,tileMat);
-  pitchZ.position.set(1.2,(EAVE+RIDGE)/2,OVER/2);pitchZ.rotation.x=PITCH;scene.add(pitchZ);
+  pitchZ.position.set(XC,(EAVE+RIDGE)/2,ZC+OVER/2);pitchZ.rotation.x=PITCH;scene.add(pitchZ);
   const pitchN=new THREE.Mesh(pitchGeo,tileMat);
-  pitchN.position.set(1.2,(EAVE+RIDGE)/2,-OVER/2);pitchN.rotation.x=-PITCH;scene.add(pitchN);
-  box(3.74,0.09,0.13,mat(0x3b3132,{r:0.9}),1.2,RIDGE+0.02,0);
+  pitchN.position.set(XC,(EAVE+RIDGE)/2,ZC-OVER/2);pitchN.rotation.x=-PITCH;scene.add(pitchN);
+  box(4.94,0.09,0.14,mat(0x3b3132,{r:0.9}),XC,RIDGE+0.02,ZC);
   // gable ends in matching brick, sitting directly under the two pitches
   const gshape=new THREE.Shape();
   gshape.moveTo(-OVER,0);gshape.lineTo(OVER,0);gshape.lineTo(0,RIDGE-EAVE);gshape.closePath();
   const ggeo=new THREE.ExtrudeGeometry(gshape,{depth:0.16,bevelEnabled:false});
-  [-0.34,2.9].forEach(gx=>{const g=new THREE.Mesh(ggeo,new THREE.MeshStandardMaterial({map:brickTex,roughness:0.92}));
-    g.rotation.y=-Math.PI/2;g.position.set(gx,EAVE-0.04,0);scene.add(g)});
+  [-0.34,4.1].forEach(gx=>{const g=new THREE.Mesh(ggeo,new THREE.MeshStandardMaterial({map:brickTex,roughness:0.92}));
+    g.rotation.y=-Math.PI/2;g.position.set(gx,EAVE-0.04,ZC);scene.add(g)});
   // chimney breaking through the north pitch
-  box(0.32,1.05,0.32,new THREE.MeshStandardMaterial({map:brickTex,roughness:0.92}),2.35,2.22,-0.28);
-  box(0.42,0.09,0.42,mat(0x2a2a31),2.35,2.79,-0.28);
+  box(0.36,1.35,0.36,new THREE.MeshStandardMaterial({map:brickTex,roughness:0.92}),3.45,3.52,ZC-0.45);
+  box(0.46,0.10,0.46,mat(0x2a2a31),3.45,4.24,ZC-0.45);
   // front door, handle and step
-  box(0.52,0.98,0.05,mat(0x1f3d2e,{r:0.5}),1.42,0.49,1.12);
-  box(0.05,0.05,0.04,mat(0xd8b45a,{m:0.7,r:0.3}),1.61,0.52,1.15);
-  box(0.72,0.05,0.28,mat(0x3a3a42,{r:0.95}),1.42,0.025,1.22);
+  box(0.56,1.05,0.05,mat(0x1f3d2e,{r:0.5}),1.35,0.525,1.12);
+  box(0.05,0.05,0.04,mat(0xd8b45a,{m:0.7,r:0.3}),1.56,0.55,1.15);
+  box(0.76,0.05,0.30,mat(0x3a3a42,{r:0.95}),1.35,0.025,1.24);
   // guttering along both eaves, with a downpipe at the near corner
   const gutMat=mat(0xd9d9df,{r:0.5});
-  box(3.76,0.07,0.09,gutMat,1.2,EAVE-0.07,OVER+0.02);
-  box(3.76,0.07,0.09,gutMat,1.2,EAVE-0.07,-(OVER+0.02));
-  {const dp=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,EAVE-0.1,10),gutMat);
-   dp.position.set(2.93,(EAVE-0.1)/2,1.18);scene.add(dp);}
+  box(4.96,0.07,0.09,gutMat,XC,EAVE-0.07,ZC+OVER+0.02);
+  box(4.96,0.07,0.09,gutMat,XC,EAVE-0.07,ZC-(OVER+0.02));
+  {const dp=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,EAVE-0.1,10),gutMat);
+   dp.position.set(4.13,(EAVE-0.1)/2,1.16);scene.add(dp);}
   // tidy solar array: 2 rows x 4 cells with silver frames, flush on the south pitch
   const pmat=new THREE.MeshStandardMaterial({color:0x0b1e3a,roughness:0.22,metalness:0.55,emissive:0x123a7a,emissiveIntensity:0.3});
   const frmat=mat(0xb9bcc4,{r:0.35,m:0.6});
   const pg=new THREE.Group();
-  for(let r=0;r<2;r++)for(let cN=0;cN<4;cN++){
-    const px=-0.99+cN*0.66, pz=-0.25+r*0.52;
+  for(let r=0;r<3;r++)for(let cN=0;cN<5;cN++){
+    const px=-1.6+cN*0.8, pz=-0.56+r*0.56;
     const fr=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.02,0.48),frmat);fr.position.set(px,-0.01,pz);pg.add(fr);
     const cell=new THREE.Mesh(new THREE.BoxGeometry(0.56,0.035,0.42),pmat);cell.position.set(px,0.01,pz);pg.add(cell);
   }
@@ -439,16 +440,18 @@ function initFlow3D(){
   F3.panel={material:pmat};
   // windows: glass behind a white frame, with mullions and a stone sill
   const winMat=mat(0xffe9a8,{e:0xffd980,ei:0.5}),frameMat=mat(0xf0f0f3,{r:0.45}),sillMat=mat(0xdcdce2,{r:0.6});
-  [1.9,2.5].forEach(wx=>{
-    box(0.50,0.68,0.03,frameMat,wx,0.78,1.104);
-    box(0.42,0.60,0.02,winMat,wx,0.78,1.116);
-    box(0.032,0.60,0.022,frameMat,wx,0.78,1.122);
-    box(0.42,0.032,0.022,frameMat,wx,0.78,1.122);
-    box(0.58,0.05,0.11,sillMat,wx,0.42,1.14);
+  // two storeys: a ground-floor pair beside the door, four across upstairs
+  [[2.35,0.95],[3.45,0.95],[0.45,2.15],[1.45,2.15],[2.45,2.15],[3.45,2.15]].forEach(w=>{
+    const wx=w[0],wy=w[1];
+    box(0.54,0.72,0.03,frameMat,wx,wy,1.104);
+    box(0.46,0.64,0.02,winMat,wx,wy,1.116);
+    box(0.032,0.64,0.022,frameMat,wx,wy,1.122);
+    box(0.46,0.032,0.022,frameMat,wx,wy,1.122);
+    box(0.62,0.05,0.11,sillMat,wx,wy-0.40,1.14);
   });
   box(0.52,1.02,0.14,mat(0xf2f2f5,{r:0.4}),0.25,0.6,1.18);
   F3.led=box(0.05,0.86,0.02,mat(0x34c759,{e:0x34c759,ei:1.5}),0.03,0.6,1.26);
-  box(0.2,0.28,0.1,mat(0x44444e),1.0,0.5,1.14);
+  box(0.2,0.28,0.1,mat(0x44444e),0.72,0.5,1.14);
   box(1.9,1.05,1.9,mat(0x26262e),-2.2,0.53,0.15);
   box(2.05,0.12,2.05,mat(0x33333c),-2.2,1.11,0.15);
   const car=new THREE.Group();
@@ -471,7 +474,7 @@ function initFlow3D(){
   const cable=(pts)=>{const c=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)));
     scene.add(new THREE.Mesh(new THREE.TubeGeometry(c,48,0.024,8),mat(0x24242c,{r:0.7})));return c};
   F3.curves={
-    solar:cable([[1.2,2.12,0.70],[1.15,1.3,1.05],[1.02,0.62,1.14]]),
+    solar:cable([[1.8,3.46,0.58],[1.6,2.3,1.14],[1.02,0.62,1.14]]),
     pw:   cable([[0.98,0.45,1.16],[0.6,0.38,1.24],[0.28,0.6,1.24]]),
     home: cable([[1.06,0.55,1.14],[1.5,0.62,1.11],[1.85,0.72,1.05]]),
     grid: cable([[1.06,0.4,1.16],[2.6,0.1,1.35],[4.0,0.4,0.6],[5.08,2.28,-0.35]]),
@@ -493,7 +496,7 @@ function initFlow3D(){
     F3.flows[k]={sprites,speed:0,dir:1,n:0,color:new THREE.Color(0xffffff),on:false,phase:Math.random()};
   }
   /* ---- sky conditions, driven by the tado weather state ---- */
-  const SKY=new THREE.Vector3(-3.1,2.85,-1.9);
+  const SKY=new THREE.Vector3(-4.3,4.55,-2.4);
   const sunGrp=new THREE.Group();sunGrp.position.copy(SKY);scene.add(sunGrp);
   sunGrp.add(new THREE.Mesh(new THREE.SphereGeometry(0.38,20,16),new THREE.MeshBasicMaterial({color:0xffd97a})));
   {const h=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0xffc247,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0.85}));
@@ -506,23 +509,32 @@ function initFlow3D(){
     const g=x.createRadialGradient(64,64,3,64,64,62);
     g.addColorStop(0,'rgba(255,255,255,.92)');g.addColorStop(0.55,'rgba(214,220,234,.45)');g.addColorStop(1,'rgba(214,220,234,0)');
     x.fillStyle=g;x.fillRect(0,0,128,128);return new THREE.CanvasTexture(c)})();
-  const clouds=[];
-  for(let i=0;i<7;i++){
+  // evenly spaced with a little jitter, so cover spreads across the whole sky
+  // instead of clumping to one side
+  const clouds=[],CLN=9;
+  for(let i=0;i<CLN;i++){
     const s=new THREE.Sprite(new THREE.SpriteMaterial({map:cloudTex,transparent:true,depthWrite:false,opacity:0}));
-    const sc=1.5+Math.random()*1.7;s.scale.set(sc*1.9,sc,1);
-    s.position.set(-6+Math.random()*11,2.45+Math.random()*1.05,-3.6+Math.random()*1.8);
+    const sc=1.7+((i*0.41)%1)*1.9;s.scale.set(sc*2.0,sc,1);
+    s.position.set(-8.5+i*(17/CLN)+(Math.random()-0.5)*0.9,
+                   4.0+((i*0.37)%1)*1.4,
+                   -4.2+((i*0.53)%1)*2.2);
     scene.add(s);clouds.push(s);
   }
   // one buffer reused for rain streaks and snow, recoloured and reweighted
-  const PN=280;
-  const pPos=new Float32Array(PN*3),pVel=new Float32Array(PN);
-  const seed=i=>{pPos[i*3]=-6.5+Math.random()*13;pPos[i*3+1]=Math.random()*4.4;pPos[i*3+2]=-4.5+Math.random()*7.5;pVel[i]=0.65+Math.random()*0.6};
+  // rain as short falling line segments rather than points, so it reads as
+  // streaks. Snow reuses the same buffer with a near-zero streak length.
+  const PN=300,TOP=7.4,L={v:0.28};
+  const pPos=new Float32Array(PN*6),pVel=new Float32Array(PN);
+  const seed=i=>{const x=-8.5+Math.random()*17,y=Math.random()*TOP,z=-5+Math.random()*9.5;
+    pPos[i*6]=x;pPos[i*6+1]=y;pPos[i*6+2]=z;
+    pPos[i*6+3]=x;pPos[i*6+4]=y-L.v;pPos[i*6+5]=z;
+    pVel[i]=0.65+Math.random()*0.6};
   for(let i=0;i<PN;i++)seed(i);
   const pGeo=new THREE.BufferGeometry();pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
-  const pMat=new THREE.PointsMaterial({color:0x9fc6ff,size:0.055,transparent:true,opacity:0,depthWrite:false});
-  const precip=new THREE.Points(pGeo,pMat);scene.add(precip);
-  F3.sky={sunGrp,moonGrp,clouds,precip,pMat,pPos,pVel,PN,seed,cloud:0,wet:0,
-          sunOn:true,moonOn:false,cloudTarget:0.06,wetTarget:0,snow:false,speed:6.5};
+  const pMat=new THREE.LineBasicMaterial({color:0x9fc6ff,transparent:true,opacity:0,depthWrite:false});
+  const precip=new THREE.LineSegments(pGeo,pMat);scene.add(precip);
+  F3.sky={sunGrp,moonGrp,clouds,precip,pMat,pPos,pVel,PN,seed,L,TOP,cloud:0,wet:0,
+          sunOn:true,moonOn:false,cloudTarget:0.06,wetTarget:0,snow:false,snowPrev:false,speed:6.5};
   F3.setWx=(state)=>{
     const s=String(state||'').toUpperCase(),k=F3.sky;if(!k)return;
     const night=s.indexOf('NIGHT')>=0;
@@ -536,18 +548,19 @@ function initFlow3D(){
     k.wetTarget=(rain||snow)?1:0;
     k.snow=snow;
     k.pMat.color.setHex(snow?0xf2f6ff:0x9fc6ff);
-    k.pMat.size=snow?0.1:0.07;
+    // streak length only changes between rain and snow, so reseed just on the flip
+    if(k.snowPrev!==snow){k.L.v=snow?0.05:0.28;for(let i=0;i<k.PN;i++)k.seed(i);k.snowPrev=snow}
     k.speed=snow?1.2:7;
-    scene.fog.near=fog?3.5:10;scene.fog.far=fog?12:17;
+    scene.fog.near=fog?5:13;scene.fog.far=fog?17:25;
   };
   F3.setWx('SUN');
   const clock=new THREE.Clock();let T=0;
   function frame(){
     requestAnimationFrame(frame);
     const dt=Math.min(0.05,clock.getDelta());T+=dt;
-    cam.position.x=5.4+Math.sin(T*0.16)*0.3;
-    cam.position.y=4.4+Math.sin(T*0.11)*0.15;
-    cam.lookAt(0.5,0.8,0.2);
+    cam.position.x=7.7+Math.sin(T*0.16)*0.34;
+    cam.position.y=6.7+Math.sin(T*0.11)*0.18;
+    cam.lookAt(1.1,1.85,-0.15);
     for(const k in F3.flows){
       const f=F3.flows[k],c=F3.curves[k];
       f.phase+=dt*f.speed*f.dir;
@@ -564,14 +577,15 @@ function initFlow3D(){
       k.sunGrp.visible=k.sunOn;k.moonGrp.visible=k.moonOn;
       k.cloud+=(k.cloudTarget-k.cloud)*g;
       k.clouds.forEach((c,i)=>{c.material.opacity=k.cloud*(0.45+0.55*((i%3)/2));
-        c.position.x+=dt*(0.05+0.018*i);if(c.position.x>6)c.position.x=-6});
+        c.position.x+=dt*(0.05+0.018*i);if(c.position.x>8.5)c.position.x=-8.5});
       k.wet+=(k.wetTarget-k.wet)*g;
       k.pMat.opacity=k.wet*0.85;k.precip.visible=k.wet>0.02;
       if(k.wet>0.02){
         for(let i=0;i<k.PN;i++){
-          k.pPos[i*3+1]-=dt*k.speed*k.pVel[i];
-          if(k.snow)k.pPos[i*3]+=Math.sin(T*0.9+i)*dt*0.3;
-          if(k.pPos[i*3+1]<0){k.seed(i);k.pPos[i*3+1]=4.4}
+          const d=dt*k.speed*k.pVel[i];
+          k.pPos[i*6+1]-=d;k.pPos[i*6+4]-=d;
+          if(k.snow){const sx=Math.sin(T*0.9+i)*dt*0.35;k.pPos[i*6]+=sx;k.pPos[i*6+3]+=sx}
+          if(k.pPos[i*6+4]<0){k.seed(i);k.pPos[i*6+1]=k.TOP;k.pPos[i*6+4]=k.TOP-k.L.v}
         }
         k.precip.geometry.attributes.position.needsUpdate=true;
       }
