@@ -493,15 +493,15 @@ function initFlow3D(){
     F3.flows[k]={sprites,speed:0,dir:1,n:0,color:new THREE.Color(0xffffff),on:false,phase:Math.random()};
   }
   /* ---- sky conditions, driven by the tado weather state ---- */
-  const SKY=new THREE.Vector3(-3.3,4.6,-2.6);
+  const SKY=new THREE.Vector3(-3.1,2.85,-1.9);
   const sunGrp=new THREE.Group();sunGrp.position.copy(SKY);scene.add(sunGrp);
   sunGrp.add(new THREE.Mesh(new THREE.SphereGeometry(0.38,20,16),new THREE.MeshBasicMaterial({color:0xffd97a})));
   {const h=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0xffc247,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0.85}));
-   h.scale.set(3.6,3.6,1);sunGrp.add(h);}
+   h.scale.set(2.7,2.7,1);sunGrp.add(h);}
   const moonGrp=new THREE.Group();moonGrp.position.copy(SKY);scene.add(moonGrp);
   moonGrp.add(new THREE.Mesh(new THREE.SphereGeometry(0.29,20,16),new THREE.MeshBasicMaterial({color:0xdfe4f5})));
   {const h=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0x8fa6d8,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0.55}));
-   h.scale.set(2.3,2.3,1);moonGrp.add(h);}
+   h.scale.set(1.9,1.9,1);moonGrp.add(h);}
   const cloudTex=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d');
     const g=x.createRadialGradient(64,64,3,64,64,62);
     g.addColorStop(0,'rgba(255,255,255,.92)');g.addColorStop(0.55,'rgba(214,220,234,.45)');g.addColorStop(1,'rgba(214,220,234,0)');
@@ -510,13 +510,13 @@ function initFlow3D(){
   for(let i=0;i<7;i++){
     const s=new THREE.Sprite(new THREE.SpriteMaterial({map:cloudTex,transparent:true,depthWrite:false,opacity:0}));
     const sc=1.5+Math.random()*1.7;s.scale.set(sc*1.9,sc,1);
-    s.position.set(-6+Math.random()*11,3.9+Math.random()*1.3,-3.6+Math.random()*1.8);
+    s.position.set(-6+Math.random()*11,2.45+Math.random()*1.05,-3.6+Math.random()*1.8);
     scene.add(s);clouds.push(s);
   }
   // one buffer reused for rain streaks and snow, recoloured and reweighted
   const PN=280;
   const pPos=new Float32Array(PN*3),pVel=new Float32Array(PN);
-  const seed=i=>{pPos[i*3]=-6.5+Math.random()*13;pPos[i*3+1]=Math.random()*6.2;pPos[i*3+2]=-4.5+Math.random()*7.5;pVel[i]=0.65+Math.random()*0.6};
+  const seed=i=>{pPos[i*3]=-6.5+Math.random()*13;pPos[i*3+1]=Math.random()*4.4;pPos[i*3+2]=-4.5+Math.random()*7.5;pVel[i]=0.65+Math.random()*0.6};
   for(let i=0;i<PN;i++)seed(i);
   const pGeo=new THREE.BufferGeometry();pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
   const pMat=new THREE.PointsMaterial({color:0x9fc6ff,size:0.055,transparent:true,opacity:0,depthWrite:false});
@@ -568,7 +568,7 @@ function initFlow3D(){
         for(let i=0;i<k.PN;i++){
           k.pPos[i*3+1]-=dt*k.speed*k.pVel[i];
           if(k.snow)k.pPos[i*3]+=Math.sin(T*0.9+i)*dt*0.3;
-          if(k.pPos[i*3+1]<0){k.seed(i);k.pPos[i*3+1]=6.2}
+          if(k.pPos[i*3+1]<0){k.seed(i);k.pPos[i*3+1]=4.4}
         }
         k.precip.geometry.attributes.position.needsUpdate=true;
       }
