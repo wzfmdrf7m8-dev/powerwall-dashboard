@@ -317,10 +317,16 @@ async function fetchOctopus(env, state) {
         // win over the stale flat agreement; self-retires once the feed shows AGILE.
         try {
           const agFrom = (state.config || {}).export_agile_from;
-          // only while the account feed has NOT caught up: once it reports an AGILE
-          // agreement the loop above already pulls these rates, and prepending a second
-          // copy is what pushed the row count past the cap and dropped the newest slots
-          if (agFrom && !/AGILE/i.test(tariff || "") && Date.now() - Date.parse(agFrom) < 14 * 864e5) {
+          // bridge only the gap the account feed has not backfilled: it reports the
+          // AGILE agreement starting later than the real switch date, so days before
+          // that start would otherwise price at the old flat rate. Self-retires once
+          // the feed agile agreement covers export_agile_from. Duplicate rows are
+          // deduped below, so overlapping with the feed is harmless.
+          const agileAgFrom = (mp.agreements || [])
+            .filter((a) => /AGILE/i.test(a.tariff_code || ""))
+            .map((a) => Date.parse(a.valid_from || 0))
+            .sort((a, b) => a - b)[0];
+          if (agFrom && (agileAgFrom == null || agileAgFrom > Date.parse(agFrom) + 36e5)) {
             if (!state.agileExpCode || Date.now() / 1000 - (state.agileExpCodeT || 0) > 86400) {
               const prods = await getAll("https://api.octopus.energy/v1/products/", { page_size: "250" });
               const p = prods.filter((x) => x.direction === "EXPORT" && /AGILE/i.test(x.code) && !x.available_to)
