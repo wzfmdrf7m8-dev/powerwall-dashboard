@@ -344,6 +344,22 @@ async function fetchOctopus(env, state) {
           }
         } catch (e) {}
       }
+      // normalise before pricing: rateAtEpoch takes the FIRST match, so a long-span
+      // agreement row (the old flat export tariff is open-ended, valid_to null) would
+      // otherwise beat the half-hourly Agile row covering the same instant. Most
+      // specific first, then newest, dropping duplicates from overlapping sources.
+      {
+        const spanOf = (r) => (r.valid_to ? Date.parse(r.valid_to) : 8.64e15) - Date.parse(r.valid_from || 0);
+        const seenAll = new Set();
+        rates = rates
+          .filter((r) => {
+            const k = (r.valid_from || "") + "|" + (r.valid_to || "");
+            if (seenAll.has(k)) return false;
+            seenAll.add(k);
+            return true;
+          })
+          .sort((a, b) => (spanOf(a) - spanOf(b)) || (Date.parse(b.valid_from || 0) - Date.parse(a.valid_from || 0)));
+      }
       if (kind === "import") {
         out.standing_now = rateAtEpoch(standing, Date.now()) ?? STANDING_FALLBACK;
         out._standing = (out._standing || []).concat(standing);
@@ -389,7 +405,7 @@ async function fetchOctopus(env, state) {
           d.cov = Math.max(d.cov || 0, Date.parse(c.interval_end || c.interval_start) || 0);
           d.nImp = (d.nImp || 0) + 1;
         } else {
-          if (rate == null) rate = 12;
+          if (rate == null) { rate = 12; out.expFallback = (out.expFallback || 0) + 1; }
           d.expKwh += c.consumption;
           d.expEarn += c.consumption * rate;
           d.nExp = (d.nExp || 0) + 1;
@@ -398,18 +414,10 @@ async function fetchOctopus(env, state) {
       // keep every rate row still relevant to pricing (last 10 days + published
       // future) rather than a fixed row count. A count cap silently discards the
       // newest half-hours once volume grows — that is how sell prices went stale.
+      // Order is preserved from the normalisation above so the stored copy resolves
+      // exactly the way the pricing loop did.
       const keepFrom = Date.now() - 10 * 864e5;
-      const seenR = new Set();
-      const keptRates = rates
-        .filter((r) => {
-          const to = r.valid_to ? Date.parse(r.valid_to) : Infinity;
-          if (to <= keepFrom) return false;
-          const k = (r.valid_from || "") + "|" + (r.valid_to || "");
-          if (seenR.has(k)) return false;
-          seenR.add(k);
-          return true;
-        })
-        .sort((a, b) => Date.parse(b.valid_from || 0) - Date.parse(a.valid_from || 0));
+      const keptRates = rates.filter((r) => (r.valid_to ? Date.parse(r.valid_to) : Infinity) > keepFrom);
       out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: keptRates };
     }
   }
