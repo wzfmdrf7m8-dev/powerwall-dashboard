@@ -120,6 +120,7 @@
 <div class="card" id="flowCard" style="background:#141419;border-color:#26262b;margin-bottom:16px">
   <h2 style="color:#7a7a82">Live energy flow</h2>
   <div id="fStatus" style="color:#34c759;font-weight:700;font-size:15px;margin:-2px 0 4px">–</div>
+  <div id="fWx" style="color:#9a9aa2;font-size:13px;margin:0 0 4px"></div>
   <div style="display:flex;justify-content:space-around;max-width:760px;margin:6px auto 4px;text-align:center">
     <div><div id="fCar" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">IONIQ 9</div></div>
     <div><div id="fSolar" style="font-size:24px;font-weight:700;color:#f5f5f7">–</div><div style="font-size:11px;letter-spacing:2px;color:#9a9aa2">SOLAR</div></div>
@@ -267,6 +268,34 @@ async function deriveKey(pass,salt){
   return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:200000,hash:'SHA-256'},km,{name:'AES-CBC',length:256},false,['decrypt']);
 }
 const WORKER='https://powerwall-api.randlefamily.com';
+// Outdoor conditions come from tado, which the worker publishes in a separate
+// /home bundle — the main /data bundle carries no weather at all.
+const WXICON={SUN:'☀️',NIGHT_CLEAR:'🌙',NIGHT_CLOUDY:'☁️',CLOUDY:'☁️',CLOUDY_PARTLY:'⛅',CLOUDY_MOSTLY:'🌥️',
+  RAIN:'🌧️',SCATTERED_RAIN:'🌦️',DRIZZLE:'🌦️',THUNDERSTORM:'⛈️',SNOW:'🌨️',FOG:'🌫️',WINDY:'💨'};
+let WXT=0;
+async function loadHome(pass){
+  const res=await fetch(WORKER+'/home?_='+Date.now(),{cache:'no-store'});
+  if(!res.ok) return null;
+  const raw=Uint8Array.from(atob((await res.text()).trim()),c=>c.charCodeAt(0));
+  const key=await deriveKey(pass,raw.slice(0,16));
+  const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+function renderWx(h){
+  const t=(h||{}).tado||{}, wbox=el('fWx'); if(!wbox) return;
+  if(t.outside==null&&!t.weather){wbox.textContent='';return}
+  const parts=[];
+  if(t.outside!=null) parts.push(t.outside.toFixed(1)+'° outside');
+  if(t.weather) parts.push(String(t.weather).toLowerCase().replace(/_/g,' '));
+  if(t.solar!=null) parts.push('sun '+Math.round(t.solar)+'%');
+  wbox.textContent=(WXICON[t.weather]||'🌡')+'  '+parts.join('  ·  ');
+}
+// /home is rebuilt every 5 min server-side, so no point pulling it every 30s
+async function maybeWx(pass,force){
+  if(!force&&Date.now()-WXT<150000) return;
+  WXT=Date.now();
+  try{ renderWx(await loadHome(pass)) }catch(e){}
+}
 async function loadData(pass){
   // 1) Cloudflare Worker (1-min updates) 2) GitHub live branch 3) Pages copy
   let res=null;
@@ -363,7 +392,32 @@ function initFlow3D(){
       x.fillRect((tI*22+off)%132-4,r*16,20,14);
       x.fillStyle='rgba(0,0,0,.35)';x.fillRect((tI*22+off)%132-4,r*16+12,20,3)}
     const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(3,1.6);return t})();
-  const roof=box(3.7,1.7,1.7,new THREE.MeshStandardMaterial({map:tileTex,roughness:0.9}),1.2,1.7,0);roof.rotation.x=Math.PI/4;roof.scale.y=0.72;
+  // Proper gable roof: two pitch slabs plus triangular gable ends, eaves
+  // overhanging the brickwork. This was previously a cube rotated 45 degrees,
+  // which left the lower half of the diamond poking out past the walls.
+  const EAVE=1.62, RIDGE=2.5, OVER=1.3;
+  const PITCH=Math.atan2(RIDGE-EAVE,OVER);
+  const SLOPE=Math.hypot(RIDGE-EAVE,OVER)+0.06;
+  const tileMat=new THREE.MeshStandardMaterial({map:tileTex,roughness:0.9});
+  const pitchGeo=new THREE.BoxGeometry(3.72,0.07,SLOPE);
+  const pitchZ=new THREE.Mesh(pitchGeo,tileMat);
+  pitchZ.position.set(1.2,(EAVE+RIDGE)/2,OVER/2);pitchZ.rotation.x=PITCH;scene.add(pitchZ);
+  const pitchN=new THREE.Mesh(pitchGeo,tileMat);
+  pitchN.position.set(1.2,(EAVE+RIDGE)/2,-OVER/2);pitchN.rotation.x=-PITCH;scene.add(pitchN);
+  box(3.74,0.09,0.13,mat(0x3b3132,{r:0.9}),1.2,RIDGE+0.02,0);
+  // gable ends in matching brick, sitting directly under the two pitches
+  const gshape=new THREE.Shape();
+  gshape.moveTo(-OVER,0);gshape.lineTo(OVER,0);gshape.lineTo(0,RIDGE-EAVE);gshape.closePath();
+  const ggeo=new THREE.ExtrudeGeometry(gshape,{depth:0.16,bevelEnabled:false});
+  [-0.34,2.9].forEach(gx=>{const g=new THREE.Mesh(ggeo,new THREE.MeshStandardMaterial({map:brickTex,roughness:0.92}));
+    g.rotation.y=-Math.PI/2;g.position.set(gx,EAVE-0.04,0);scene.add(g)});
+  // chimney breaking through the north pitch
+  box(0.32,1.05,0.32,new THREE.MeshStandardMaterial({map:brickTex,roughness:0.92}),2.35,2.22,-0.28);
+  box(0.42,0.09,0.42,mat(0x2a2a31),2.35,2.79,-0.28);
+  // front door, handle and step
+  box(0.52,0.98,0.05,mat(0x1f3d2e,{r:0.5}),1.42,0.49,1.12);
+  box(0.05,0.05,0.04,mat(0xd8b45a,{m:0.7,r:0.3}),1.61,0.52,1.15);
+  box(0.72,0.05,0.28,mat(0x3a3a42,{r:0.95}),1.42,0.025,1.22);
   // tidy solar array: 2 rows x 4 cells with silver frames, flush on the south pitch
   const pmat=new THREE.MeshStandardMaterial({color:0x0b1e3a,roughness:0.22,metalness:0.55,emissive:0x123a7a,emissiveIntensity:0.3});
   const frmat=mat(0xb9bcc4,{r:0.35,m:0.6});
@@ -373,7 +427,8 @@ function initFlow3D(){
     const fr=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.02,0.48),frmat);fr.position.set(px,-0.01,pz);pg.add(fr);
     const cell=new THREE.Mesh(new THREE.BoxGeometry(0.56,0.035,0.42),pmat);cell.position.set(px,0.01,pz);pg.add(cell);
   }
-  pg.position.set(1.2,2.02,0.6);pg.rotation.x=-Math.PI/4;scene.add(pg);
+  // parented to the south pitch, so the array can never drift off the roof plane
+  pg.position.set(0,0.055,0);pitchZ.add(pg);
   F3.panel={material:pmat};
   box(0.42,0.6,0.02,mat(0xffe9a8,{e:0xffd980,ei:0.5}),1.9,0.78,1.11);
   box(0.42,0.6,0.02,mat(0xffe9a8,{e:0xffd980,ei:0.5}),2.5,0.78,1.11);
@@ -402,7 +457,7 @@ function initFlow3D(){
   const cable=(pts)=>{const c=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)));
     scene.add(new THREE.Mesh(new THREE.TubeGeometry(c,48,0.024,8),mat(0x24242c,{r:0.7})));return c};
   F3.curves={
-    solar:cable([[1.2,2.3,0.4],[1.15,1.3,1.05],[1.02,0.62,1.14]]),
+    solar:cable([[1.2,2.12,0.70],[1.15,1.3,1.05],[1.02,0.62,1.14]]),
     pw:   cable([[0.98,0.45,1.16],[0.6,0.38,1.24],[0.28,0.6,1.24]]),
     home: cable([[1.06,0.55,1.14],[1.5,0.62,1.11],[1.85,0.72,1.05]]),
     grid: cable([[1.06,0.4,1.16],[2.6,0.1,1.35],[4.0,0.4,0.6],[5.08,2.28,-0.35]]),
@@ -926,9 +981,10 @@ async function unlock(pass){
   try{
     const p=pass!==undefined?pass:val('pw');
     render(await loadData(p));
+    maybeWx(p,true);
     PASS=p; el('overlay').style.display='none';
     localStorage.setItem('pw_pass',p);
-    if(!refresher) refresher=setInterval(async()=>{try{render(await loadData(PASS))}catch(e){}},30*1000);
+    if(!refresher) refresher=setInterval(async()=>{try{render(await loadData(PASS));maybeWx(PASS)}catch(e){}},30*1000);
     // NetZero-style freshness: nudge the worker for a full refresh on open,
     // then pull the rebuilt bundle a few seconds later
     fetch(`${WORKER}/cmd`,{method:'POST',headers:{'Content-Type':'application/json','x-auth':p},
