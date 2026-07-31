@@ -317,9 +317,10 @@ async function fetchOctopus(env, state) {
         // win over the stale flat agreement; self-retires once the feed shows AGILE.
         try {
           const agFrom = (state.config || {}).export_agile_from;
-          // unconditional for 14 days after the switch: even if the account feed lists the
-          // agile agreement, its start date may lag reality; direct rates always win
-          if (agFrom && Date.now() - Date.parse(agFrom) < 14 * 864e5) {
+          // only while the account feed has NOT caught up: once it reports an AGILE
+          // agreement the loop above already pulls these rates, and prepending a second
+          // copy is what pushed the row count past the cap and dropped the newest slots
+          if (agFrom && !/AGILE/i.test(tariff || "") && Date.now() - Date.parse(agFrom) < 14 * 864e5) {
             if (!state.agileExpCode || Date.now() / 1000 - (state.agileExpCodeT || 0) > 86400) {
               const prods = await getAll("https://api.octopus.energy/v1/products/", { page_size: "250" });
               const p = prods.filter((x) => x.direction === "EXPORT" && /AGILE/i.test(x.code) && !x.available_to)
@@ -388,7 +389,22 @@ async function fetchOctopus(env, state) {
           d.nExp = (d.nExp || 0) + 1;
         }
       }
-      out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: rates.slice(kind === "export" ? -450 : -200) };
+      // keep every rate row still relevant to pricing (last 10 days + published
+      // future) rather than a fixed row count. A count cap silently discards the
+      // newest half-hours once volume grows — that is how sell prices went stale.
+      const keepFrom = Date.now() - 10 * 864e5;
+      const seenR = new Set();
+      const keptRates = rates
+        .filter((r) => {
+          const to = r.valid_to ? Date.parse(r.valid_to) : Infinity;
+          if (to <= keepFrom) return false;
+          const k = (r.valid_from || "") + "|" + (r.valid_to || "");
+          if (seenR.has(k)) return false;
+          seenR.add(k);
+          return true;
+        })
+        .sort((a, b) => Date.parse(b.valid_from || 0) - Date.parse(a.valid_from || 0));
+      out[kind] = { mpan: mp.mpan, tariff, consumption: consumption.slice(-150), rates: keptRates };
     }
   }
   // last-2-days accuracy: Octopus's REST feeds lag (imports ~a day, exports worse).
@@ -584,7 +600,7 @@ async function pushTariff(env, state, sid, log) {
   const cfgT = ((state.config || {}).tariff_sync) || {};
   const offP = (cfgT.offpeak ?? 5.9) / 100, onP = (cfgT.peak ?? 31.33) / 100;
   const expRates = (((state.octopus || {}).export) || {}).rates || [];
-  if (!expRates.length) { log.push("tariff sync: no export rates yet"); return; }
+  if (!expRates.length) { log.push("tariff sync: no export rates yet"); return false; }
   // one-time backup of the app-configured plan
   if (!state.tariffBackedUp) {
     try {
@@ -600,13 +616,18 @@ async function pushTariff(env, state, sid, log) {
   for (let h = 0; h < 48; h++) { const v = rateAtEpoch(sellAll, base + h * 1800e3 + 900e3); if (v != null) { avg += v; nAvg++; } }
   avg = nAvg ? avg / nAvg : 12;
   const sellRates = {}, sellPeriods = {};
+  const missing = [];
   for (let h = 0; h < 48; h++) {
     const k = "R" + String(h).padStart(2, "0");
-    const v = rateAtEpoch(sellAll, base + h * 1800e3 + 900e3) ?? avg;
+    let v = rateAtEpoch(sellAll, base + h * 1800e3 + 900e3);
+    if (v == null) { missing.push(h); v = avg; }
     sellRates[k] = Math.round(v * 10) / 1000; // p -> GBP, 3dp
     const m = h * 30;
     sellPeriods[k] = touPeriods([{ s: m, e: m + 30 }]);
   }
+  // refuse to push a partially-priced day. Falling back silently is what put a flat
+  // 12p on the Powerwall across a 21p evening peak on 30 Jul 2026.
+  if (missing.length) throw new Error("sell rates missing for " + missing.length + " of 48 half-hours (first slot " + missing[0] + ") — not pushing");
   const season = { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31 };
   const content = {
     version: 1, monthly_minimum_bill: 0, min_applicable_demand: 0, max_applicable_demand: 0, monthly_charges: 0,
@@ -632,6 +653,7 @@ async function pushTariff(env, state, sid, log) {
   };
   log.push(`tariff synced: ${off.length} cheap window(s), sell avg ${avg.toFixed(1)}p`);
   console.log(`tariff synced: off=${JSON.stringify(off)} sellAvg=${avg.toFixed(2)}p`);
+  return true;
 }
 
 async function vaillantDhwBoost(env, state, on) {
@@ -953,8 +975,9 @@ async function pollCycle(env, state, opts = {}) {
         // 5-min throttle: a fresh Ohme grant minutes after a push (e.g. the midnight
         // rewrite) must reach the Powerwall while the slot is still running
         if (state.tariffSig !== sig && now - (state.lastTariffPush || 0) > 300) {
-          await pushTariff(env, state, sid, log);
-          state.tariffSig = sig; state.lastTariffPush = now;
+          // only record success on an actual push — a silent no-op previously
+          // suppressed every retry until the day rolled over
+          if (await pushTariff(env, state, sid, log)) { state.tariffSig = sig; state.lastTariffPush = now; }
         }
       }
     } catch (e) { log.push("tariff sync: " + String(e).slice(0, 120)); console.log("tariff sync failed: " + String(e).slice(0, 200)); }
