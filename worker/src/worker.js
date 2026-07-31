@@ -626,22 +626,36 @@ async function pushTariff(env, state, sid, log) {
   const { off, on } = tariffIntervals(state);
   const base = Date.parse(londonDayStartISO(new Date()));
   const sellAll = expRates.filter((r) => true);
+  // Agile is always half-hourly, so a match against a long-span row means the real
+  // rate is not published yet. The old flat export agreement is open-ended and would
+  // otherwise answer for every slot — that is how a dead 12p tariff reached the
+  // Powerwall. Treat a long-span match as unpriced rather than as a price.
+  const agileAt = (ms) => {
+    for (const r of sellAll) {
+      const f = Date.parse(r.valid_from), t = r.valid_to ? Date.parse(r.valid_to) : Infinity;
+      if (f <= ms && ms < t) return t - f <= 2 * 864e5 ? r.value_inc_vat : null;
+    }
+    return null;
+  };
   let avg = 0, nAvg = 0;
-  for (let h = 0; h < 48; h++) { const v = rateAtEpoch(sellAll, base + h * 1800e3 + 900e3); if (v != null) { avg += v; nAvg++; } }
+  for (let h = 0; h < 48; h++) { const v = agileAt(base + h * 1800e3 + 900e3); if (v != null) { avg += v; nAvg++; } }
   avg = nAvg ? avg / nAvg : 12;
   const sellRates = {}, sellPeriods = {};
   const missing = [];
   for (let h = 0; h < 48; h++) {
     const k = "R" + String(h).padStart(2, "0");
-    let v = rateAtEpoch(sellAll, base + h * 1800e3 + 900e3);
+    let v = agileAt(base + h * 1800e3 + 900e3);
     if (v == null) { missing.push(h); v = avg; }
     sellRates[k] = Math.round(v * 10) / 1000; // p -> GBP, 3dp
     const m = h * 30;
     sellPeriods[k] = touPeriods([{ s: m, e: m + 30 }]);
   }
-  // refuse to push a partially-priced day. Falling back silently is what put a flat
-  // 12p on the Powerwall across a 21p evening peak on 30 Jul 2026.
-  if (missing.length) throw new Error("sell rates missing for " + missing.length + " of 48 half-hours (first slot " + missing[0] + ") — not pushing");
+  // Octopus publishes next-day Agile ~16:15, so a couple of unpublished slots at the
+  // tail of the day is normal — estimate those from today’s own average and say so.
+  // A large gap is the signature of the Jul 2026 truncation bug, where 29 contiguous
+  // slots fell through to a dead 12p tariff. Never push that.
+  if (missing.length > 6) throw new Error("sell rates missing for " + missing.length + " of 48 half-hours (first slot " + missing[0] + ") — not pushing");
+  if (missing.length) log.push("tariff sync: " + missing.length + " slot(s) unpublished, estimated at " + avg.toFixed(1) + "p");
   const season = { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31 };
   const content = {
     version: 1, monthly_minimum_bill: 0, min_applicable_demand: 0, max_applicable_demand: 0, monthly_charges: 0,
@@ -664,6 +678,7 @@ async function pushTariff(env, state, sid, log) {
     t: localOffsetISO().slice(0, 19),
     off, offP: Math.round(offP * 10000) / 100, onP: Math.round(onP * 10000) / 100,
     sell: Array.from({ length: 48 }, (_, h) => Math.round(sellRates["R" + String(h).padStart(2, "0")] * 10000) / 100),
+    missing: missing.length,
   };
   log.push(`tariff synced: ${off.length} cheap window(s), sell avg ${avg.toFixed(1)}p`);
   console.log(`tariff synced: off=${JSON.stringify(off)} sellAvg=${avg.toFixed(2)}p`);
