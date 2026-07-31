@@ -53,7 +53,7 @@
 <div class="err" id="err"></div>
 
 <div class="card" id="tariffCard" hidden>
-  <h3 style="font-size:13px;font-weight:600;color:var(--dim);margin-bottom:4px">RATES ON THE POWERWALL</h3>
+  <h3 style="font-size:13px;font-weight:600;color:var(--dim);margin-bottom:4px">LAST AUTO-SYNC PUSH</h3>
   <div class="sub" id="tSub" style="margin-bottom:8px"></div>
   <div id="tWindows" style="font-size:13px;margin-bottom:10px"></div>
   <div id="tNow"></div>
@@ -133,7 +133,19 @@ function renderTariff(d){
   const tp=d.tariff_push;
   if(!tp){el('tariffCard').hidden=true;return}
   el('tariffCard').hidden=false;
-  el('tSub').textContent='pushed to Tesla at '+tp.t.replace('T',' ')+' · buy: '+tp.offP.toFixed(1)+'p cheap / '+tp.onP.toFixed(1)+'p peak';
+  // age of the push, in London time so it stays right when away from home. A stale
+  // push used to render identically to a fresh one — that is how a broken tariff sat
+  // on the Powerwall for 30 hours unnoticed on 30 Jul 2026.
+  const lonNow=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date()).replace(', ','T').replace('T24:','T00:');
+  const ageH=(Date.parse(lonNow)-Date.parse(tp.t))/36e5;
+  const stale=!(ageH<26);
+  const age=ageH<1?Math.max(0,Math.round(ageH*60))+'m ago':Math.round(ageH)+'h ago';
+  const syncOff=(((d.automations||{}).tariff_sync)||{}).enabled===false;
+  el('tSub').innerHTML='pushed to Tesla at '+tp.t.replace('T',' ')
+    +' · <span class="'+(stale?'warn':'tag')+'">'+age+(stale?' — STALE':'')+'</span>'
+    +' · buy: '+tp.offP.toFixed(1)+'p cheap / '+tp.onP.toFixed(1)+'p peak'
+    +(syncOff?' · <span class="warn">sync disabled</span>':'')
+    +(tp.missing?' · <span class="warn">'+tp.missing+' slot'+(tp.missing===1?'':'s')+' estimated</span>':'');
   const mm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   el('tWindows').innerHTML='Cheap import windows: '+(tp.off||[]).map(w=>'<b>'+mm(w.s)+'–'+(w.e===1440?'00:00':mm(w.e))+'</b>').join(' · ');
   const inOff=m=>(tp.off||[]).some(w=>m>=w.s&&m<w.e);
