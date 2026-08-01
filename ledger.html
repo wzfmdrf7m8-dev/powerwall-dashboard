@@ -151,7 +151,9 @@ function renderTariff(d){
     +' · buy: '+tp.offP.toFixed(1)+'p cheap / '+tp.onP.toFixed(1)+'p peak'
     +(syncOff?' · <span class="warn">sync disabled</span>':'')
     +(tp.missing?' · <span class="warn">'+tp.missing+' slot'+(tp.missing===1?'':'s')+' estimated</span>':'')
-    +(tp.plan?' · <span class="plantag">'+tp.plan.p+'p export plan '+slotLbl(tp.plan.from)+'–'+slotLbl(tp.plan.to+1)+'</span>':'');
+    +(tp.plan?' · <span class="plantag">'+tp.plan.p+'p export plan '+slotLbl(tp.plan.from)+'–'+slotLbl(tp.plan.to+1)
+        +(tp.plan.minP?' where ≥'+tp.plan.minP+'p':'')
+        +(tp.plan.on?' · '+tp.plan.on.length+'/'+(tp.plan.to-tp.plan.from+1)+' slots':'')+'</span>':'');
   const mm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   el('tWindows').innerHTML='Cheap import windows: '+(tp.off||[]).map(w=>'<b>'+mm(w.s)+'–'+(w.e===1440?'00:00':mm(w.e))+'</b>').join(' · ');
   const inOff=m=>(tp.off||[]).some(w=>m>=w.s&&m<w.e);
@@ -166,7 +168,9 @@ function renderTariff(d){
     const m=h*30, buyOff=inOff(m), sell=tp.sell[h], isNow=h===cur;
     // slots inside the export plan are an override pushed to the Powerwall, not a
     // real Octopus price - flag them so the two are never confused
-    const planned=tp.plan&&h>=tp.plan.from&&h<=tp.plan.to;
+    // only the slots actually overridden - ones left at the real price because they
+    // fell below the floor must not be tagged as plan
+    const planned=!!(tp.plan&&(tp.plan.on?tp.plan.on.indexOf(h)>=0:(h>=tp.plan.from&&h<=tp.plan.to)));
     rows+='<tr class="'+(isNow?'now ':'')+(planned?'plan':'')+'"><td>'+mm(m)+(isNow?' <span class="nowtag">now</span>':'')+'</td>'+
       '<td class="'+(buyOff?'ok':'')+'">'+(buyOff?tp.offP.toFixed(1):tp.onP.toFixed(1))+'</td>'+
       '<td class="'+(!planned&&sell>=hi?'ok':'')+'" style="'+(!planned&&sell>=hi?'font-weight:700':'')+'">'+sell.toFixed(2)+(planned?' <span class="plantag">plan</span>':'')+'</td></tr>';
