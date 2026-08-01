@@ -31,6 +31,8 @@
   tr.now td{background:#fff4d6}
   tr.now td:first-child{box-shadow:inset 3px 0 0 var(--sun);font-weight:700}
   .nowtag{font-size:10px;color:var(--sun);font-weight:700;letter-spacing:.03em}
+  .plantag{font-size:10px;color:var(--violet);font-weight:700}
+  tr.plan td:last-child{color:var(--violet)}
   #tNow{font-size:14px;margin-bottom:10px;padding:8px 10px;background:#fff4d6;border-radius:10px}
   #tNow b{font-variant-numeric:tabular-nums}
   .ok{color:var(--mint)} .warn{color:var(--pink)}
@@ -129,6 +131,9 @@ function render(d){
       <td class="hidesm">${gbp(tStand)}</td>
       <td class="${tNet<0?'ok':''}">${tNet<0?'−':''}${gbp(Math.abs(tNet))}</td></tr>`;
 }
+// half-hour slot index -> HH:MM. Declared out here because renderTariff sets the
+// subtitle before mm/endLbl are defined further down.
+const slotLbl=s=>String(Math.floor(s/2)%24).padStart(2,'0')+':'+(s%2?'30':'00');
 function renderTariff(d){
   const tp=d.tariff_push;
   if(!tp){el('tariffCard').hidden=true;return}
@@ -145,7 +150,8 @@ function renderTariff(d){
     +' · <span class="'+(stale?'warn':'tag')+'">'+age+(stale?' — STALE':'')+'</span>'
     +' · buy: '+tp.offP.toFixed(1)+'p cheap / '+tp.onP.toFixed(1)+'p peak'
     +(syncOff?' · <span class="warn">sync disabled</span>':'')
-    +(tp.missing?' · <span class="warn">'+tp.missing+' slot'+(tp.missing===1?'':'s')+' estimated</span>':'');
+    +(tp.missing?' · <span class="warn">'+tp.missing+' slot'+(tp.missing===1?'':'s')+' estimated</span>':'')
+    +(tp.plan?' · <span class="plantag">'+tp.plan.p+'p export plan '+slotLbl(tp.plan.from)+'–'+slotLbl(tp.plan.to+1)+'</span>':'');
   const mm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   el('tWindows').innerHTML='Cheap import windows: '+(tp.off||[]).map(w=>'<b>'+mm(w.s)+'–'+(w.e===1440?'00:00':mm(w.e))+'</b>').join(' · ');
   const inOff=m=>(tp.off||[]).some(w=>m>=w.s&&m<w.e);
@@ -158,9 +164,12 @@ function renderTariff(d){
   let rows='';
   for(let h=0;h<48;h++){
     const m=h*30, buyOff=inOff(m), sell=tp.sell[h], isNow=h===cur;
-    rows+='<tr class="'+(isNow?'now':'')+'"><td>'+mm(m)+(isNow?' <span class="nowtag">now</span>':'')+'</td>'+
+    // slots inside the export plan are an override pushed to the Powerwall, not a
+    // real Octopus price - flag them so the two are never confused
+    const planned=tp.plan&&h>=tp.plan.from&&h<=tp.plan.to;
+    rows+='<tr class="'+(isNow?'now ':'')+(planned?'plan':'')+'"><td>'+mm(m)+(isNow?' <span class="nowtag">now</span>':'')+'</td>'+
       '<td class="'+(buyOff?'ok':'')+'">'+(buyOff?tp.offP.toFixed(1):tp.onP.toFixed(1))+'</td>'+
-      '<td class="'+(sell>=hi?'ok':'')+'" style="'+(sell>=hi?'font-weight:700':'')+'">'+sell.toFixed(2)+'</td></tr>';
+      '<td class="'+(!planned&&sell>=hi?'ok':'')+'" style="'+(!planned&&sell>=hi?'font-weight:700':'')+'">'+sell.toFixed(2)+(planned?' <span class="plantag">plan</span>':'')+'</td></tr>';
   }
   el('tTbl').innerHTML='<tr><th>from</th><th>buy p/kWh</th><th>sell p/kWh</th></tr>'+rows;
   const cs=tp.sell[cur];
