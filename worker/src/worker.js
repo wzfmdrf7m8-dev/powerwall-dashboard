@@ -122,6 +122,8 @@ async function loadState(env) {
   if (!state.mig_ts1) { state.config.tariff_sync = { enabled: true, offpeak: 5.9, peak: 31.33 }; state.mig_ts1 = 1; }
   // flat evening export plan pushed to the Powerwall (not a real price)
   if (!state.mig_plan1) { state.config.export_plan = { pence: 20, fromH: 16, toH: 22 }; state.mig_plan1 = 1; }
+  // don't force export when the slot is genuinely poor — leave those at the real price
+  if (!state.mig_plan2) { state.config.export_plan = { pence: 20, fromH: 16, toH: 22, minP: 12 }; state.mig_plan2 = 1; }
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -662,14 +664,24 @@ async function pushTariff(env, state, sid, log) {
   // so Time-Based Control discharges steadily through it instead of chasing spikes.
   // This is a CONTROL SIGNAL, not a price. The ledger's daily metered totals are
   // priced from the real Octopus rates and are deliberately untouched by this.
-  const ocfg = ((state.config || {}).export_plan) || { pence: 0, fromH: 16, toH: 22 };
+  const ocfg = ((state.config || {}).export_plan) || { pence: 0, fromH: 16, toH: 22, minP: 0 };
   const oFrom = Math.max(0, Math.round(ocfg.fromH * 2));      // 16:00 -> slot 32
   const oTo = Math.min(47, Math.round(ocfg.toH * 2) - 1);     // 22:00 -> slot 43 (21:30-22:00)
+  const minP = ocfg.minP ?? 0;
+  const planOn = [];
   if (ocfg.pence > 0) {
+    let skipped = 0;
     for (let h = oFrom; h <= oTo; h++) {
-      sellRates["R" + String(h).padStart(2, "0")] = Math.round(ocfg.pence * 10) / 1000;
+      const k = "R" + String(h).padStart(2, "0");
+      const realP = sellRates[k] * 100;   // GBP back to pence: the true Agile rate
+      // A slot below the floor isn't worth exporting into, so leave the real price
+      // and let the Powerwall make its own call rather than being told 20p.
+      if (realP < minP) { skipped++; continue; }
+      sellRates[k] = Math.round(ocfg.pence * 10) / 1000;
+      planOn.push(h);
     }
-    log.push("export plan: " + ocfg.pence + "p flat on slots " + oFrom + "-" + oTo);
+    log.push("export plan: " + ocfg.pence + "p on " + planOn.length + " slot(s), "
+      + skipped + " left at real price (below " + minP + "p)");
   }
   const season = { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31 };
   const content = {
@@ -694,7 +706,7 @@ async function pushTariff(env, state, sid, log) {
     off, offP: Math.round(offP * 10000) / 100, onP: Math.round(onP * 10000) / 100,
     sell: Array.from({ length: 48 }, (_, h) => Math.round(sellRates["R" + String(h).padStart(2, "0")] * 10000) / 100),
     missing: missing.length,
-    plan: ocfg.pence > 0 ? { p: ocfg.pence, from: oFrom, to: oTo } : null,
+    plan: ocfg.pence > 0 ? { p: ocfg.pence, from: oFrom, to: oTo, minP, on: planOn } : null,
   };
   log.push(`tariff synced: ${off.length} cheap window(s), sell avg ${avg.toFixed(1)}p`);
   console.log(`tariff synced: off=${JSON.stringify(off)} sellAvg=${avg.toFixed(2)}p`);
