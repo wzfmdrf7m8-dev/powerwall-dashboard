@@ -33,6 +33,7 @@
   .nowtag{font-size:10px;color:var(--sun);font-weight:700;letter-spacing:.03em}
   .plantag{font-size:10px;color:var(--violet);font-weight:700}
   .realv{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .payavg{font-size:13px;color:var(--mint);font-weight:700}
   tr.plan td:last-child{color:var(--violet)}
   #tNow{font-size:14px;margin-bottom:10px;padding:8px 10px;background:#fff4d6;border-radius:10px}
   #tNow b{font-variant-numeric:tabular-nums}
@@ -139,6 +140,11 @@ function renderTariff(d){
   const tp=d.tariff_push;
   if(!tp){el('tariffCard').hidden=true;return}
   el('tariffCard').hidden=false;
+  // What Octopus will actually pay across the slots we overrode. The 20p is only
+  // a dispatch signal - this is the rate the export really settles at.
+  const pOn=(tp.plan&&tp.plan.on)?tp.plan.on:[];
+  const pReal=pOn.map(h=>(tp.real&&tp.real[h]!=null)?tp.real[h]:null).filter(x=>x!=null);
+  const pAvg=pReal.length?pReal.reduce((a,b)=>a+b,0)/pReal.length:null;
   // age of the push, in London time so it stays right when away from home. A stale
   // push used to render identically to a fresh one — that is how a broken tariff sat
   // on the Powerwall for 30 hours unnoticed on 30 Jul 2026.
@@ -154,7 +160,8 @@ function renderTariff(d){
     +(tp.missing?' · <span class="warn">'+tp.missing+' slot'+(tp.missing===1?'':'s')+' estimated</span>':'')
     +(tp.plan?' · <span class="plantag">'+tp.plan.p+'p export plan '+slotLbl(tp.plan.from)+'–'+slotLbl(tp.plan.to+1)
         +(tp.plan.minP?' where ≥'+tp.plan.minP+'p':'')
-        +(tp.plan.on?' · '+tp.plan.on.length+'/'+(tp.plan.to-tp.plan.from+1)+' slots':'')+'</span>':'');
+        +(tp.plan.on?' · '+tp.plan.on.length+'/'+(tp.plan.to-tp.plan.from+1)+' slots':'')+'</span>':'')
+    +(pAvg!=null?' · <span class="payavg">Octopus will pay ~'+pAvg.toFixed(2)+'p avg across those slots</span>':'');
   const mm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   el('tWindows').innerHTML='Cheap import windows: '+(tp.off||[]).map(w=>'<b>'+mm(w.s)+'–'+(w.e===1440?'00:00':mm(w.e))+'</b>').join(' · ');
   const inOff=m=>(tp.off||[]).some(w=>m>=w.s&&m<w.e);
