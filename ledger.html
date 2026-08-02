@@ -32,6 +32,7 @@
   tr.now td:first-child{box-shadow:inset 3px 0 0 var(--sun);font-weight:700}
   .nowtag{font-size:10px;color:var(--sun);font-weight:700;letter-spacing:.03em}
   .plantag{font-size:10px;color:var(--violet);font-weight:700}
+  .realv{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
   tr.plan td:last-child{color:var(--violet)}
   #tNow{font-size:14px;margin-bottom:10px;padding:8px 10px;background:#fff4d6;border-radius:10px}
   #tNow b{font-variant-numeric:tabular-nums}
@@ -171,11 +172,15 @@ function renderTariff(d){
     // only the slots actually overridden - ones left at the real price because they
     // fell below the floor must not be tagged as plan
     const planned=!!(tp.plan&&(tp.plan.on?tp.plan.on.indexOf(h)>=0:(h>=tp.plan.from&&h<=tp.plan.to)));
+    const realp=(tp.real&&tp.real[h]!=null)?tp.real[h]:null;
     rows+='<tr class="'+(isNow?'now ':'')+(planned?'plan':'')+'"><td>'+mm(m)+(isNow?' <span class="nowtag">now</span>':'')+'</td>'+
       '<td class="'+(buyOff?'ok':'')+'">'+(buyOff?tp.offP.toFixed(1):tp.onP.toFixed(1))+'</td>'+
-      '<td class="'+(!planned&&sell>=hi?'ok':'')+'" style="'+(!planned&&sell>=hi?'font-weight:700':'')+'">'+sell.toFixed(2)+(planned?' <span class="plantag">plan</span>':'')+'</td></tr>';
+      '<td class="'+(!planned&&sell>=hi?'ok':'')+'" style="'+(!planned&&sell>=hi?'font-weight:700':'')+'">'+sell.toFixed(2)
+        // for overridden slots show what Octopus is actually paying in brackets
+        +(planned&&realp!=null?' <span class="realv">('+realp.toFixed(2)+')</span>':'')
+        +(planned?' <span class="plantag">plan</span>':'')+'</td></tr>';
   }
-  el('tTbl').innerHTML='<tr><th>from</th><th>buy p/kWh</th><th>sell p/kWh</th></tr>'+rows;
+  el('tTbl').innerHTML='<tr><th>from</th><th>buy p/kWh</th><th>sell p/kWh'+(tp.real?' <span class="realv">(octopus)</span>':'')+'</th></tr>'+rows;
   const cs=tp.sell[cur];
   el('tNow').innerHTML='Now '+mm(cur*30)+'–'+endLbl(cur*30+30)+' · buy <b>'+(inOff(cur*30)?tp.offP.toFixed(1):tp.onP.toFixed(1))+'p</b> · sell <b>'+(cs==null?'—':cs.toFixed(2))+'p</b>';
 }
