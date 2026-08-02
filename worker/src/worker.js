@@ -664,6 +664,10 @@ async function pushTariff(env, state, sid, log) {
   // so Time-Based Control discharges steadily through it instead of chasing spikes.
   // This is a CONTROL SIGNAL, not a price. The ledger's daily metered totals are
   // priced from the real Octopus rates and are deliberately untouched by this.
+  // Snapshot the true Agile prices before any override, so the ledger can show
+  // what we pushed alongside what Octopus is actually paying.
+  const realSell = Array.from({ length: 48 }, (_, h) =>
+    Math.round(sellRates["R" + String(h).padStart(2, "0")] * 10000) / 100);
   const ocfg = ((state.config || {}).export_plan) || { pence: 0, fromH: 16, toH: 22, minP: 0 };
   const oFrom = Math.max(0, Math.round(ocfg.fromH * 2));      // 16:00 -> slot 32
   const oTo = Math.min(47, Math.round(ocfg.toH * 2) - 1);     // 22:00 -> slot 43 (21:30-22:00)
@@ -707,10 +711,28 @@ async function pushTariff(env, state, sid, log) {
     sell: Array.from({ length: 48 }, (_, h) => Math.round(sellRates["R" + String(h).padStart(2, "0")] * 10000) / 100),
     missing: missing.length,
     plan: ocfg.pence > 0 ? { p: ocfg.pence, from: oFrom, to: oTo, minP, on: planOn } : null,
+    real: realSell,
   };
   log.push(`tariff synced: ${off.length} cheap window(s), sell avg ${avg.toFixed(1)}p`);
   console.log(`tariff synced: off=${JSON.stringify(off)} sellAvg=${avg.toFixed(2)}p`);
+  // Persist immediately. When a push runs inside a /cmd request the every-minute
+  // cron holds its own copy of state and writes it back afterwards, clobbering
+  // this field — the push reached Tesla but the record of it was lost.
+  try { await env.PW.put("tariffpush.json", JSON.stringify(state.tariffPushed)); } catch (e) {}
   return true;
+}
+
+// R2 is the source of truth for the last push, for the reason above.
+async function lastTariffPush(env, state) {
+  let cur = state.tariffPushed || null;
+  try {
+    const o = await env.PW.get("tariffpush.json");
+    if (o) {
+      const j = JSON.parse(await o.text());
+      if (j && (!cur || String(j.t || "") > String(cur.t || ""))) { cur = j; state.tariffPushed = j; }
+    }
+  } catch (e) {}
+  return cur;
 }
 
 async function vaillantDhwBoost(env, state, on) {
@@ -1028,7 +1050,12 @@ async function pollCycle(env, state, opts = {}) {
     try {
       const ts = ((state.config || {}).tariff_sync) || {};
       if (ts.enabled) {
-        const sig = localMinuteISO().slice(0, 10) + JSON.stringify(tariffIntervals(state).off);
+        // config is part of the signature so changing the export plan or the
+        // buy rates forces a push on the next cycle instead of waiting for midnight
+        const sig = localMinuteISO().slice(0, 10)
+          + JSON.stringify(tariffIntervals(state).off)
+          + JSON.stringify(ts)
+          + JSON.stringify((state.config || {}).export_plan || null);
         // 5-min throttle: a fresh Ohme grant minutes after a push (e.g. the midnight
         // rewrite) must reach the Powerwall while the slot is still running
         if (state.tariffSig !== sig && now - (state.lastTariffPush || 0) > 300) {
@@ -1167,7 +1194,7 @@ async function pollCycle(env, state, opts = {}) {
     ohme: state.ohmeData || null,
     hp: state.hp || null,
     pw_health: Object.values(state.pwHealth || {}).sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-400),
-    tariff_push: state.tariffPushed || null,
+    tariff_push: await lastTariffPush(env, state),
     source: "cloudflare-worker",
   };
   const enc = await encryptBundle(state, bundle);
