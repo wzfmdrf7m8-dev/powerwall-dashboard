@@ -160,8 +160,8 @@ function renderTariff(d){
     +(tp.missing?' · <span class="warn">'+tp.missing+' slot'+(tp.missing===1?'':'s')+' estimated</span>':'')
     +(tp.plan?' · <span class="plantag">'+tp.plan.p+'p export plan '+slotLbl(tp.plan.from)+'–'+slotLbl(tp.plan.to+1)
         +(tp.plan.minP?' where ≥'+tp.plan.minP+'p':'')
-        +(tp.plan.on?' · '+tp.plan.on.length+'/'+(tp.plan.to-tp.plan.from+1)+' slots':'')+'</span>':'')
-    +(pAvg!=null?' · <span class="payavg">Octopus will pay ~'+pAvg.toFixed(2)+'p avg across those slots</span>':'');
+        +(tp.plan.on?' · '+(tp.plan.on.length - (tp.plan.extra || []).length)+'/'+(tp.plan.to-tp.plan.from+1)+' slots':'')+'</span>':'')
+    +(pAvg!=null?' · <span class="payavg">Octopus will pay ~'+pAvg.toFixed(2)+'p avg across those slots' + ((tp.plan.extra && tp.plan.extra.length) ? ' · +' + tp.plan.extra.length + ' earned by ohme (' + tp.plan.extra.map(slotLbl).join(', ') + ')' : '') + '</span>':'');
   const mm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
   el('tWindows').innerHTML='Cheap import windows: '+(tp.off||[]).map(w=>'<b>'+mm(w.s)+'–'+(w.e===1440?'00:00':mm(w.e))+'</b>').join(' · ');
   const inOff=m=>(tp.off||[]).some(w=>m>=w.s&&m<w.e);
