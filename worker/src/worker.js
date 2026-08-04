@@ -748,9 +748,9 @@ async function pushTariff(env, state, sid, log) {
     if (earned.size) {
       const shoulder = [];
       for (let h = Math.max(0, planFrom - 4); h < planFrom; h++) shoulder.push(h); // 14:00-16:00
-      for (let h = oTo + 1; h <= Math.min(47, oTo + 2); h++) shoulder.push(h);     // 22:00-23:00
+      for (let h = oTo + 1; h <= Math.min(47, oTo + 3); h++) shoulder.push(h);     // 22:00-23:30
       picks = shoulder
-        .filter((h) => h > nowIdx && !ohmeAll.has(h) && realAt(h) >= minP)
+        .filter((h) => h > nowIdx && !ohmeAll.has(h) && !inCheap(h) && realAt(h) >= minP)
         .sort((a, b) => realAt(b) - realAt(a) || a - b)
         .slice(0, earned.size);
       for (const h of picks) {
