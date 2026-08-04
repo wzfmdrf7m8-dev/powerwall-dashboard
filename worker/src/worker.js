@@ -124,6 +124,13 @@ async function loadState(env) {
   if (!state.mig_plan1) { state.config.export_plan = { pence: 20, fromH: 16, toH: 22 }; state.mig_plan1 = 1; }
   // don't force export when the slot is genuinely poor — leave those at the real price
   if (!state.mig_plan2) { state.config.export_plan = { pence: 20, fromH: 16, toH: 22, minP: 12 }; state.mig_plan2 = 1; }
+  // what the Powerwall does during an Ohme cheap slot: "charge" (existing) or
+  // "hold" (leave the cheap import for the car, and stop the battery exporting)
+  if (!state.mig_ohold1) {
+    state.config.ohme_slot_mode = state.config.ohme_slot_mode || "charge";
+    state.config.ohme_hold_export = state.config.ohme_hold_export || "pv_only";
+    state.mig_ohold1 = 1;
+  }
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -754,6 +761,14 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
       log.push(`reserve -> ${pct}% (${why})`);
     }
   };
+  const setExportRule = async (rule, why) => {
+    const cur = ((siteInfo.components || {}).customer_preferred_export_rule);
+    if (cur !== rule) {
+      await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/grid_import_export`,
+        { customer_preferred_export_rule: rule });
+      log.push(`export rule -> ${rule} (${why})`);
+    }
+  };
   const setGridCharging = async (allowed, why) => {
     const cur = ((siteInfo.components || {}).disallow_charge_from_grid_with_solar_installed);
     if (cur !== !allowed) {
@@ -769,7 +784,18 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     const nowIso = new Date().toISOString();
     const inSlot = ohmeOk && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso && nowIso < sl.end);
     const day = cfg.day || {};
-    if (inSlot) {
+    const slotMode = cfg.ohme_slot_mode || "charge";
+    if (inSlot && slotMode === "hold") {
+      // Hold: the cheap import is for the car. Don't pull the Powerwall up on it,
+      // and stop the battery exporting so it isn't discharging into a half-hour
+      // we're deliberately importing in. Remember the export rule to restore after.
+      if (state.ohmePrevExport == null)
+        state.ohmePrevExport = ((siteInfo.components || {}).customer_preferred_export_rule) || "battery_ok";
+      state.pwSlotCharge = null;
+      await setReserve(day.reserve ?? 0, "ohme slot, hold");
+      await setGridCharging(false, "ohme slot, hold - cheap import is for the car");
+      await setExportRule(cfg.ohme_hold_export || "pv_only", "ohme slot, hold");
+    } else if (inSlot) {
       // slot rule: enter below 95% -> charge; stop at 95%; only restart if it drops to 50%
       const soc = (((state.hist || [])[ (state.hist || []).length - 1 ]) || {}).soc ?? 0;
       if (state.pwSlotCharge == null) state.pwSlotCharge = soc < 95 ? 1 : 0;
@@ -781,6 +807,10 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
       state.pwSlotCharge = null;
       await setReserve(day.reserve ?? 0, "outside ohme slots");
       await setGridCharging(true, "always enabled");
+      if (state.ohmePrevExport != null) {
+        await setExportRule(state.ohmePrevExport, "ohme slot ended");
+        state.ohmePrevExport = null;
+      }
     }
   }
   // heat the hot water tank to 65° during Ohme off-peak slots, restore after
@@ -1361,6 +1391,9 @@ async function runCommand(env, state, command, value) {
     await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/grid_import_export`,
       { customer_preferred_export_rule: rule });
     log.push(`export rule -> ${rule} (manual)`);
+  } else if (command === "ohme_mode") {
+    state.config.ohme_slot_mode = value === "hold" ? "hold" : "charge";
+    log.push(`ohme slot mode -> ${state.config.ohme_slot_mode}`);
   } else if (command === "follow_ohme") {
     state.config.follow_ohme_slots = value === "on";
     log.push(`follow ohme slots -> ${value}`);
