@@ -1107,6 +1107,25 @@ function render(d){
   if(a.enabled&&a.cheap_window&&a.cheap_window.enabled) html+='<span class="pill">cheap window '+a.cheap_window.start+'–'+a.cheap_window.end+'</span>';
   html+='<span class="pill">Powerwall follows Ohme slots: '+(a.follow_ohme_slots?'on':'off')+'</span>';
   html+='<span class="pill">Hot water 60° in Ohme slots: '+(a.dhw_ohme_slots?'on':'off')+'</span>';
+  // read-only: what an Ohme slot would do right now, and why. Mirrors the
+  // worker's auto logic (worker.js applyAutomation) - same window, same rule.
+  html += '<div class="sub" style="margin-top:6px">Ohme slots: ' + (function () {
+    var A = a || {}, p = A.export_plan || {};
+    var fh = p.fromH == null ? 16 : p.fromH, th = p.toH == null ? 22 : p.toH;
+    var hh = function (h) { return (h < 10 ? '0' : '') + h + ':00'; };
+    var t = new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour12: false });
+    var mins = (+t.slice(0, 2)) * 60 + (+t.slice(3, 5));
+    var inWin = mins >= fh * 60 && mins < th * 60;
+    var mode = A.ohme_slot_mode || 'charge';
+    var eff = mode === 'auto' ? (inWin ? 'hold' : 'charge') : mode;
+    var policy = mode === 'auto'
+      ? 'charge outside ' + hh(fh) + '\u2013' + hh(th) + ', hold inside'
+      : 'forced to ' + mode;
+    var doing = eff === 'hold'
+      ? 'hold (no Powerwall charge, no battery export)'
+      : 'charge the Powerwall';
+    return policy + ' \u00b7 a slot right now would ' + doing;
+  })() + (a && a.dhw_ohme_slots ? ' \u00b7 hot water boosts either way' : '') + '</div>';
   html+='<span class="pill">Tesla tariff sync: '+((a.tariff_sync&&a.tariff_sync.enabled)?'on':'off')+'</span>';
   el('autos').innerHTML=html;
   el('lastlog').textContent=(d.log&&d.log.length)?('Last run: '+d.log.join('; ')):'Last run: no changes made';
