@@ -678,7 +678,33 @@ async function pushTariff(env, state, sid, log) {
   const realSell = Array.from({ length: 48 }, (_, h) =>
     Math.round(sellRates["R" + String(h).padStart(2, "0")] * 10000) / 100);
   const ocfg = ((state.config || {}).export_plan) || { pence: 0, fromH: 16, toH: 22, minP: 0 };
-  const oFrom = Math.max(0, Math.round(ocfg.fromH * 2));      // 16:00 -> slot 32
+    const planFrom = Math.max(0, Math.round(ocfg.fromH * 2)); // 16:00 -> slot 32
+    // An Ohme slot finishing before the window opens leaves the battery full with
+    // nothing to do, so bring the export window forward to the end of that slot.
+    // Gated at midday: an overnight slot is followed by a whole solar day that
+    // refills the battery anyway, and opening a ten-hour window would only drain
+    // it long before the evening peak.
+    let oFrom = planFrom;
+    if (ocfg.pence > 0) {
+      const todayLocal = localMinuteISO().slice(0, 10);
+      const FLOOR = 24; // 12:00, as a half-hour slot index
+      let lastEnd = -1;
+      for (const sl of ((state.ohmeData || {}).slots) || []) {
+        const ms = Date.parse((sl || {}).end);
+        if (!ms) continue;
+        const lm = localMinuteISO(new Date(ms));
+        if (lm.slice(0, 10) !== todayLocal) continue;  // today's slots only
+        const s = Math.ceil(((+lm.slice(11, 13)) * 60 + (+lm.slice(14, 16))) / 30);
+        if (s < FLOOR || s >= planFrom) continue;      // too early, or already covered
+        if (s > lastEnd) lastEnd = s;                  // want the LAST one to finish
+      }
+      if (lastEnd >= 0) {
+        oFrom = lastEnd;
+        const lbl = String(Math.floor(oFrom / 2)).padStart(2, '0') + (oFrom % 2 ? ':30' : ':00');
+        log.push('export window pulled forward to ' + lbl + ' (ohme slot ended before ' +
+          ocfg.fromH + ':00, battery already full)');
+      }
+    }
   const oTo = Math.min(47, Math.round(ocfg.toH * 2) - 1);     // 22:00 -> slot 43 (21:30-22:00)
   const minP = ocfg.minP ?? 0;
   const planOn = [];
@@ -1097,6 +1123,7 @@ async function pollCycle(env, state, opts = {}) {
         const sig = localMinuteISO().slice(0, 10)
           + JSON.stringify(tariffIntervals(state).off)
           + JSON.stringify(ts)
+          + JSON.stringify((((state.ohmeData || {}).slots) || []).map((s) => s.end))
           + JSON.stringify((state.config || {}).export_plan || null);
         // 5-min throttle: a fresh Ohme grant minutes after a push (e.g. the midnight
         // rewrite) must reach the Powerwall while the slot is still running
