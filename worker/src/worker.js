@@ -497,6 +497,13 @@ async function fetchOctopus(env, state) {
               const ek = (reg - prevReg) / 1000;
               const dd = daily[dy];
               dd.expKwh += ek; dd.expEarn += ek * (rateAtEpoch(expRates, ts) ?? expDayAvg(dy));
+              // Coverage has to follow the export register as well, not just the
+              // import one. In the evening the house is net exporting, so the
+              // import delta is zero, the import branch is skipped and cov froze
+              // at the last import - while expKwh kept climbing. The energy page
+              // then re-integrated everything after cov on top of a figure that
+              // already included it, near enough doubling the day's exports.
+              dd.cov = Math.max(dd.cov || 0, ts);
             }
             prevReg = reg;
           }
