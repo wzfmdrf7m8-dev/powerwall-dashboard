@@ -678,60 +678,77 @@ async function pushTariff(env, state, sid, log) {
   const realSell = Array.from({ length: 48 }, (_, h) =>
     Math.round(sellRates["R" + String(h).padStart(2, "0")] * 10000) / 100);
   const ocfg = ((state.config || {}).export_plan) || { pence: 0, fromH: 16, toH: 22, minP: 0 };
-    const planFrom = Math.max(0, Math.round(ocfg.fromH * 2)); // 16:00 -> slot 32
-    // An Ohme slot before the window means the battery was topped up cheaply, so
-    // widen the export window by the same amount of time: one half-hour at the
-    // plan price for each half-hour Ohme ran, counted back from the normal start.
-    // One 30 min slot therefore opens the window at 15:30, two at 15:00, and so on.
-    // The overnight cheap window never counts - it's followed by a whole solar day
-    // that refills the battery regardless, so it shouldn't move the peak at all.
-    let oFrom = planFrom;
-    if (ocfg.pence > 0) {
-      const todayLocal = localMinuteISO().slice(0, 10);
-      const FLOOR = 28; // 14:00 - never open the window before this
-      // Read the cheap window from config rather than hardcoding 23:30-05:30, so
-      // moving it can't silently start feeding overnight charging into the peak.
-      const cw = (state.config || {}).cheap_window || {};
-      const toIdx = (hhmm, dflt) => {
-        const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
-        return m ? Math.floor((+m[1] * 60 + +m[2]) / 30) : dflt;
-      };
-      const cwA = toIdx(cw.start, 47), cwB = toIdx(cw.end, 11);
-      const inCheap = (i) => (cwA <= cwB ? i >= cwA && i < cwB : i >= cwA || i < cwB);
-      const covered = new Set();
-      for (const sl of ((state.ohmeData || {}).slots) || []) {
-        const st = Date.parse((sl || {}).start), en = Date.parse((sl || {}).end);
-        if (!st || !en || en <= st) continue;
-        for (let ms = st; ms < en; ms += 18e5) {   // walk the slot in half-hours
-          const lm = localMinuteISO(new Date(ms));
-          if (lm.slice(0, 10) !== todayLocal) continue;
-          const idx = Math.floor(((+lm.slice(11, 13)) * 60 + (+lm.slice(14, 16))) / 30);
-          if (idx < planFrom && !inCheap(idx)) covered.add(idx);
-        }
-      }
-      if (covered.size) {
-        oFrom = Math.max(FLOOR, planFrom - covered.size);
-        const lbl = String(Math.floor(oFrom / 2)).padStart(2, '0') + (oFrom % 2 ? ':30' : ':00');
-        log.push('export window widened to ' + lbl + ' (' + covered.size +
-          ' ohme half-hour(s) outside the cheap window)');
-      }
-    }
-  const oTo = Math.min(47, Math.round(ocfg.toH * 2) - 1);     // 22:00 -> slot 43 (21:30-22:00)
+  const planFrom = Math.max(0, Math.round(ocfg.fromH * 2)); // 16:00 -> slot 32
+  const oTo = Math.min(47, Math.round(ocfg.toH * 2) - 1);   // 22:00 -> slot 43
   const minP = ocfg.minP ?? 0;
   const planOn = [];
+  let oFrom = planFrom;
   if (ocfg.pence > 0) {
+    const key = (h) => "R" + String(h).padStart(2, "0");
+    const realAt = (h) => realSell[h];   // pence, captured before we touch anything
+    const hhmm = (h) => String(Math.floor(h / 2)).padStart(2, "0") + (h % 2 ? ":30" : ":00");
+
+    /* How much extra export has Ohme earned? Every half-hour the car charges
+       outside the overnight cheap window is a half-hour the battery was topped
+       up for next to nothing, so it buys one extra half-hour of forced export.
+       The cheap window itself never counts - a whole solar day follows it and
+       refills the battery regardless. */
+    const todayLocal = localMinuteISO().slice(0, 10);
+    const cw = (state.config || {}).cheap_window || {};
+    const toIdx = (x, dflt) => {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(String(x || ""));
+      return m ? Math.floor((+m[1] * 60 + +m[2]) / 30) : dflt;
+    };
+    const cwA = toIdx(cw.start, 47), cwB = toIdx(cw.end, 11);
+    const inCheap = (i) => (cwA <= cwB ? i >= cwA && i < cwB : i >= cwA || i < cwB);
+    const ohmeAll = new Set();   // every half-hour the car is due to charge
+    const earned = new Set();    // ...of those, the ones that earn an export slot
+    for (const sl of ((state.ohmeData || {}).slots) || []) {
+      const st = Date.parse((sl || {}).start), en = Date.parse((sl || {}).end);
+      if (!st || !en || en <= st) continue;
+      for (let ms = st; ms < en; ms += 18e5) {
+        const lm = localMinuteISO(new Date(ms));
+        if (lm.slice(0, 10) !== todayLocal) continue;
+        const i = Math.floor(((+lm.slice(11, 13)) * 60 + (+lm.slice(14, 16))) / 30);
+        ohmeAll.add(i);
+        if (i < planFrom && !inCheap(i)) earned.add(i);
+      }
+    }
+
+    // the core window: flat plan price, except where Agile is below the floor
     let skipped = 0;
-    for (let h = oFrom; h <= oTo; h++) {
-      const k = "R" + String(h).padStart(2, "0");
-      const realP = sellRates[k] * 100;   // GBP back to pence: the true Agile rate
-      // A slot below the floor isn't worth exporting into, so leave the real price
-      // and let the Powerwall make its own call rather than being told 20p.
-      if (realP < minP) { skipped++; continue; }
-      sellRates[k] = Math.round(ocfg.pence * 10) / 1000;
+    for (let h = planFrom; h <= oTo; h++) {
+      if (realAt(h) < minP) { skipped++; continue; }
+      sellRates[key(h)] = Math.round(ocfg.pence * 10) / 1000;
       planOn.push(h);
     }
-    log.push("export plan: " + ocfg.pence + "p on " + planOn.length + " slot(s), "
-      + skipped + " left at real price (below " + minP + "p)");
+
+    /* Spend the earned slots on the best-paying shoulders rather than simply
+       backdating from the window start: rank the half-hours either side of it
+       and take the highest. Half-hours the car is charging in are excluded,
+       since exporting while importing for the car is just churn. */
+    let picks = [];
+    if (earned.size) {
+      const shoulder = [];
+      for (let h = Math.max(0, planFrom - 4); h < planFrom; h++) shoulder.push(h); // 14:00-16:00
+      for (let h = oTo + 1; h <= Math.min(47, oTo + 2); h++) shoulder.push(h);     // 22:00-23:00
+      picks = shoulder
+        .filter((h) => !ohmeAll.has(h) && realAt(h) >= minP)
+        .sort((a, b) => realAt(b) - realAt(a) || a - b)
+        .slice(0, earned.size);
+      for (const h of picks) {
+        // never push a slot down: if Agile already beats the plan price, keep the
+        // real one so the Powerwall still ranks that half-hour above the rest
+        sellRates[key(h)] = Math.round(Math.max(realAt(h), ocfg.pence) * 10) / 1000;
+        planOn.push(h);
+      }
+      planOn.sort((a, b) => a - b);
+      log.push("ohme earned " + earned.size + " extra slot(s), took " + picks.length +
+        (picks.length ? ": " + picks.slice().sort((a, b) => a - b).map(hhmm).join(", ") : ""));
+    }
+    if (planOn.length) oFrom = planOn[0];
+    log.push("export plan: " + ocfg.pence + "p on " + planOn.length + " slot(s), " +
+      skipped + " left at real price (below " + minP + "p)");
   }
   const season = { fromMonth: 1, fromDay: 1, toMonth: 12, toDay: 31 };
   const content = {
