@@ -701,7 +701,11 @@ async function pushTariff(env, state, sid, log) {
        up for next to nothing, so it buys one extra half-hour of forced export.
        The cheap window itself never counts - a whole solar day follows it and
        refills the battery regardless. */
-    const todayLocal = localMinuteISO().slice(0, 10);
+    const lmNow = localMinuteISO();
+      const todayLocal = lmNow.slice(0, 10);
+      // a slot that has already been and gone can't be exported into, so spending
+      // an earned credit on it just throws the credit away
+      const nowIdx = Math.floor(((+lmNow.slice(11, 13)) * 60 + (+lmNow.slice(14, 16))) / 30);
     const cw = (state.config || {}).cheap_window || {};
     const toIdx = (x, dflt) => {
       const m = /^(\d{1,2}):(\d{2})$/.exec(String(x || ""));
@@ -719,7 +723,12 @@ async function pushTariff(env, state, sid, log) {
         if (lm.slice(0, 10) !== todayLocal) continue;
         const i = Math.floor(((+lm.slice(11, 13)) * 60 + (+lm.slice(14, 16))) / 30);
         ohmeAll.add(i);
-        if (i < planFrom && !inCheap(i)) earned.add(i);
+        // Two ways an ohme slot earns extra export. Before the window, it tops the
+        // battery up cheaply. Inside the window, hold cancels export we had already
+        // planned at the plan price and the energy stays in the battery. Either way
+        // it needs somewhere else to go. After the window it earns nothing - there
+        // is no export left today to move it to.
+        if (i <= oTo && !inCheap(i)) earned.add(i);
       }
     }
 
@@ -741,7 +750,7 @@ async function pushTariff(env, state, sid, log) {
       for (let h = Math.max(0, planFrom - 4); h < planFrom; h++) shoulder.push(h); // 14:00-16:00
       for (let h = oTo + 1; h <= Math.min(47, oTo + 2); h++) shoulder.push(h);     // 22:00-23:00
       picks = shoulder
-        .filter((h) => !ohmeAll.has(h) && realAt(h) >= minP)
+        .filter((h) => h > nowIdx && !ohmeAll.has(h) && realAt(h) >= minP)
         .sort((a, b) => realAt(b) - realAt(a) || a - b)
         .slice(0, earned.size);
       for (const h of picks) {
