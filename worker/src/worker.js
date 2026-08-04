@@ -683,6 +683,7 @@ async function pushTariff(env, state, sid, log) {
   const minP = ocfg.minP ?? 0;
   const planOn = [];
   let oFrom = planFrom;
+  const planExtra = [];   // ohme-earned slots outside the core window
   if (ocfg.pence > 0) {
     const key = (h) => "R" + String(h).padStart(2, "0");
     const realAt = (h) => realSell[h];   // pence, captured before we touch anything
@@ -742,11 +743,11 @@ async function pushTariff(env, state, sid, log) {
         sellRates[key(h)] = Math.round(Math.max(realAt(h), ocfg.pence) * 10) / 1000;
         planOn.push(h);
       }
+      planExtra.push(...picks.slice().sort((a, b) => a - b));
       planOn.sort((a, b) => a - b);
       log.push("ohme earned " + earned.size + " extra slot(s), took " + picks.length +
         (picks.length ? ": " + picks.slice().sort((a, b) => a - b).map(hhmm).join(", ") : ""));
     }
-    if (planOn.length) oFrom = planOn[0];
     log.push("export plan: " + ocfg.pence + "p on " + planOn.length + " slot(s), " +
       skipped + " left at real price (below " + minP + "p)");
   }
@@ -773,7 +774,7 @@ async function pushTariff(env, state, sid, log) {
     off, offP: Math.round(offP * 10000) / 100, onP: Math.round(onP * 10000) / 100,
     sell: Array.from({ length: 48 }, (_, h) => Math.round(sellRates["R" + String(h).padStart(2, "0")] * 10000) / 100),
     missing: missing.length,
-    plan: ocfg.pence > 0 ? { p: ocfg.pence, from: oFrom, to: oTo, minP, on: planOn } : null,
+    plan: ocfg.pence > 0 ? { p: ocfg.pence, from: oFrom, to: oTo, minP, extra: planExtra, on: planOn } : null,
     real: realSell,
   };
   log.push(`tariff synced: ${off.length} cheap window(s), sell avg ${avg.toFixed(1)}p`);
