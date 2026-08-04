@@ -683,13 +683,21 @@ async function pushTariff(env, state, sid, log) {
     // widen the export window by the same amount of time: one half-hour at the
     // plan price for each half-hour Ohme ran, counted back from the normal start.
     // One 30 min slot therefore opens the window at 15:30, two at 15:00, and so on.
-    // Only daytime slots count - the regular overnight car charge is followed by a
-    // full solar day that refills the battery anyway, so it shouldn't move anything.
+    // The overnight cheap window never counts - it's followed by a whole solar day
+    // that refills the battery regardless, so it shouldn't move the peak at all.
     let oFrom = planFrom;
     if (ocfg.pence > 0) {
       const todayLocal = localMinuteISO().slice(0, 10);
-      const MORNING = 12; // 06:00 - earlier than this is the overnight car charge
-      const FLOOR = 24;   // 12:00 - never open the window before midday
+      const FLOOR = 28; // 14:00 - never open the window before this
+      // Read the cheap window from config rather than hardcoding 23:30-05:30, so
+      // moving it can't silently start feeding overnight charging into the peak.
+      const cw = (state.config || {}).cheap_window || {};
+      const toIdx = (hhmm, dflt) => {
+        const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
+        return m ? Math.floor((+m[1] * 60 + +m[2]) / 30) : dflt;
+      };
+      const cwA = toIdx(cw.start, 47), cwB = toIdx(cw.end, 11);
+      const inCheap = (i) => (cwA <= cwB ? i >= cwA && i < cwB : i >= cwA || i < cwB);
       const covered = new Set();
       for (const sl of ((state.ohmeData || {}).slots) || []) {
         const st = Date.parse((sl || {}).start), en = Date.parse((sl || {}).end);
@@ -698,14 +706,14 @@ async function pushTariff(env, state, sid, log) {
           const lm = localMinuteISO(new Date(ms));
           if (lm.slice(0, 10) !== todayLocal) continue;
           const idx = Math.floor(((+lm.slice(11, 13)) * 60 + (+lm.slice(14, 16))) / 30);
-          if (idx >= MORNING && idx < planFrom) covered.add(idx);
+          if (idx < planFrom && !inCheap(idx)) covered.add(idx);
         }
       }
       if (covered.size) {
         oFrom = Math.max(FLOOR, planFrom - covered.size);
         const lbl = String(Math.floor(oFrom / 2)).padStart(2, '0') + (oFrom % 2 ? ':30' : ':00');
         log.push('export window widened to ' + lbl + ' (' + covered.size +
-          ' daytime ohme half-hour(s))');
+          ' ohme half-hour(s) outside the cheap window)');
       }
     }
   const oTo = Math.min(47, Math.round(ocfg.toH * 2) - 1);     // 22:00 -> slot 43 (21:30-22:00)
