@@ -131,6 +131,8 @@ async function loadState(env) {
     state.config.ohme_hold_export = state.config.ohme_hold_export || "pv_only";
     state.mig_ohold1 = 1;
   }
+  // auto: charge outside the export window, hold inside it
+  if (!state.mig_ohold2) { state.config.ohme_slot_mode = "auto"; state.mig_ohold2 = 1; }
   // one-time migration (2026-07-17e): extend history to ~2 years for the Year view
   if (!state.mig_yr1) {
     state.octoDeepFill = 0; delete state.octoFillCursor; state.lastOcto = 0;
@@ -784,7 +786,17 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     const nowIso = new Date().toISOString();
     const inSlot = ohmeOk && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso && nowIso < sl.end);
     const day = cfg.day || {};
-    const slotMode = cfg.ohme_slot_mode || "charge";
+    // "auto" ties slot behaviour to the export window: a cheap slot outside it is
+    // a chance to fill the battery, but one inside it would mean importing and
+    // exporting in the same half-hour, so we hold instead. Window is read from the
+    // export plan config so the two can never drift apart.
+    const pw = cfg.export_plan || {};
+    const pFrom = (pw.fromH ?? 16) * 60, pTo = (pw.toH ?? 22) * 60;
+    const lmNow = localMinuteISO();
+    const nowMin = (+lmNow.slice(11, 13)) * 60 + (+lmNow.slice(14, 16));
+    const inExportWindow = nowMin >= pFrom && nowMin < pTo;
+    const modeCfg = cfg.ohme_slot_mode || "charge";
+    const slotMode = modeCfg === "auto" ? (inExportWindow ? "hold" : "charge") : modeCfg;
     if (inSlot && slotMode === "hold") {
       // Hold: the cheap import is for the car. Don't pull the Powerwall up on it,
       // and stop the battery exporting so it isn't discharging into a half-hour
@@ -1392,7 +1404,7 @@ async function runCommand(env, state, command, value) {
       { customer_preferred_export_rule: rule });
     log.push(`export rule -> ${rule} (manual)`);
   } else if (command === "ohme_mode") {
-    state.config.ohme_slot_mode = value === "hold" ? "hold" : "charge";
+    state.config.ohme_slot_mode = ["hold", "charge", "auto"].indexOf(value) >= 0 ? value : "auto";
     log.push(`ohme slot mode -> ${state.config.ohme_slot_mode}`);
   } else if (command === "follow_ohme") {
     state.config.follow_ohme_slots = value === "on";
