@@ -925,9 +925,26 @@ function renderNet(d){
       // grid at the peak rate until the cheap window opens. House load is served
       // first, and only what is left over gets exported.
       const planSet = new Set(rest);
+      // Half-hours the car is charging in. Everything the house draws then comes off
+      // the grid at the smart-charge rate, and the battery is left alone - the pack
+      // is not depleted, the import is simply cheap enough to be worth taking.
+      const ohmeSet = new Set();
+      for (const sl of ((d.ohme || {}).slots) || []) {
+        const st = Date.parse((sl || {}).start), en = Date.parse((sl || {}).end);
+        if (!st || !en || en <= st) continue;
+        for (let ms = st; ms < en; ms += 1800000) {
+          const l2 = new Date(ms).toLocaleString("sv-SE", { timeZone: "Europe/London" });
+          if (l2.slice(0, 10) !== todayStr) continue;
+          ohmeSet.add(Math.floor(((+l2.slice(11, 13)) * 60 + (+l2.slice(14, 16))) / 30));
+        }
+      }
       let bank = avail, expMore = 0, kwhMore = 0, impMore = 0;
       for (let hh = Math.ceil(nowMin / 30); hh < 48; hh++) {
         const houseKwh = loadKw * 0.5;
+        if (ohmeSet.has(hh)) {
+          impMore += houseKwh * (tp.offP || 0);   // cheap grid, battery untouched
+          continue;                                // and hold stops it exporting
+        }
         const fromBatt = Math.min(bank, houseKwh);
         bank -= fromBatt;
         const shortfall = houseKwh - fromBatt;
