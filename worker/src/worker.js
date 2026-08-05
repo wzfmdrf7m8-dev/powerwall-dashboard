@@ -868,12 +868,21 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     const inExportWindow = nowMin >= pFrom && nowMin < pTo;
     const modeCfg = cfg.ohme_slot_mode || "charge";
     const slotMode = modeCfg === "auto" ? (inExportWindow ? "hold" : "charge") : modeCfg;
+    // The export rule is asserted from config on every cycle rather than being
+    // remembered and restored. The previous version stashed the pre-slot value in
+    // state and put it back when the slot ended, which fails the moment the worker
+    // restarts mid-slot: the stash is lost, the restore never runs and pv_only
+    // latches on indefinitely. That is exactly what happened overnight, and it
+    // would have blocked the battery from exporting all of the next day.
+    await setExportRule(
+      inSlot && slotMode === "hold"
+        ? cfg.ohme_hold_export || "pv_only"
+        : cfg.ohme_export_normal || "battery_ok",
+      inSlot && slotMode === "hold" ? "ohme slot, hold" : "no hold in effect");
     if (inSlot && slotMode === "hold") {
       // Hold: the cheap import is for the car. Don't pull the Powerwall up on it,
       // and stop the battery exporting so it isn't discharging into a half-hour
       // we're deliberately importing in. Remember the export rule to restore after.
-      if (state.ohmePrevExport == null)
-        state.ohmePrevExport = ((siteInfo.components || {}).customer_preferred_export_rule) || "battery_ok";
       state.pwSlotCharge = null;
       await setReserve(day.reserve ?? 0, "ohme slot, hold");
       await setGridCharging(false, "ohme slot, hold - cheap import is for the car");
@@ -890,10 +899,6 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
       state.pwSlotCharge = null;
       await setReserve(day.reserve ?? 0, "outside ohme slots");
       await setGridCharging(true, "always enabled");
-      if (state.ohmePrevExport != null) {
-        await setExportRule(state.ohmePrevExport, "ohme slot ended");
-        state.ohmePrevExport = null;
-      }
     }
   }
   // heat the hot water tank to 65° during Ohme off-peak slots, restore after
