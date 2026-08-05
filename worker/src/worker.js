@@ -4,7 +4,9 @@
 const STANDING_FALLBACK = 66.38; // pence/day — from the Jun/Jul 2026 statement (66.38p/day)
 const TESLA_API = "https://fleet-api.prd.eu.vn.cloud.tesla.com";
 const TESLA_TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
-const OHME_GOOGLE_KEY = "AIzaSyC8ZeZngm33tpOXLpbXeKfwtyZ1WrkbdBY";
+// Ohme's Firebase web key lives in env.OHME_GOOGLE_KEY, not here. It is a public
+// client identifier rather than a real secret, but keeping key-shaped strings out
+// of the repo stops secret scanning alerts drowning out a genuine one later.
 const REPO_RAW = "https://raw.githubusercontent.com/wzfmdrf7m8-dev/powerwall-dashboard";
 const TZ = "Europe/London";
 const HIST_MAX = 1600; // ~26h of minutes; older days are served from day_bins instead
@@ -537,7 +539,7 @@ async function ohmeToken(env, state) {
   const now = Date.now() / 1000;
   if (o.idToken && now - (o.birth || 0) < 2700) return o.idToken;
   if (o.refreshToken) {
-    const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${OHME_GOOGLE_KEY}`, {
+    const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${(env.OHME_GOOGLE_KEY || "")}`, {
       method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grantType: "refresh_token", refreshToken: o.refreshToken }),
     });
@@ -547,7 +549,7 @@ async function ohmeToken(env, state) {
       return o.idToken;
     }
   }
-  const r = await fetch(`https://www.googleapis.com/identitytoolkit/v3/relyingparty/verifyPassword?key=${OHME_GOOGLE_KEY}`, {
+  const r = await fetch(`https://www.googleapis.com/identitytoolkit/v3/relyingparty/verifyPassword?key=${(env.OHME_GOOGLE_KEY || "")}`, {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ email: env.OHME_EMAIL, password: env.OHME_PASSWORD, returnSecureToken: "true" }),
   });
