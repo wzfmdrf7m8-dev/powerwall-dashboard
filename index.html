@@ -112,6 +112,7 @@
     <div class="sub" id="netLbl">Billing month (from 15th)</div>
     <div id="netCost" style="font-size:26px;font-weight:750;font-variant-numeric:tabular-nums">–</div>
     <div class="sub" id="netBreak" style="font-size:11px"></div>
+    <div class="sub" id="netFcast" style="margin-top:2px"></div>
   </div>
   <div class="sub" id="modeline"></div>
   <button class="sec" style="font-size:12px;padding:5px 12px" onclick="lockNow()">Lock</button>
@@ -883,6 +884,45 @@ function renderNet(d){
   n.style.color=net<=0?'var(--mint)':'var(--pink)';
   el('netLbl').textContent=label+' · net '+(net<=0?'credit':'cost');
   el('netBreak').textContent='imports '+gbp(imp)+' + standing '+gbp(stand)+' − exports '+gbp(exp);
+  // Projected end of day. Only shown for today - a finished day is its own answer.
+  // Export assumes EXPORT_KW for each planned slot still to come, capped by what is
+  // actually in the pack plus the solar still forecast, because 7 kW across a whole
+  // window is more energy than four Powerwalls hold. Import carries today's average
+  // draw forward, priced at each remaining slot's own buy rate.
+  if (el("netFcast")) {
+    let ftxt = "";
+    if (selDay === today && net != null) {
+      const EXPORT_KW = 7;
+      const packKwh = 13.5 * (((d.site_info || {}).battery_count) || 4);
+      const tp = d.tariff_push || {};
+      const lmf = new Date().toLocaleString("sv-SE", { timeZone: "Europe/London" });
+      const nowMin = (+lmf.slice(11, 13)) * 60 + (+lmf.slice(14, 16));
+      const rest = (((tp.plan || {}).on) || []).filter((h) => h > Math.floor(nowMin / 30)).sort((a, b) => a - b);
+      const soc = (d.live || {}).percentage_charged || 0;
+      const resv = (d.site_info || {}).backup_reserve_percent || 0;
+      let avail = Math.max(0, ((soc - resv) / 100) * packKwh);
+      for (const sf of d.solar_forecast || []) if (sf.h >= nowMin / 60) avail += (sf.w || 0) / 1000;
+      let expMore = 0, kwhMore = 0;
+      for (const h of rest) {
+        if (avail <= 0) break;
+        const kwh = Math.min(EXPORT_KW * 0.5, avail);
+        avail -= kwh; kwhMore += kwh;
+        expMore += (kwh * ((tp.real && tp.real[h] != null) ? tp.real[h] : 0)) / 100;
+      }
+      const dRow = ((d.octopus || {}).daily || []).find((x) => x.d === today);
+      const impKw = (dRow ? (dRow.impKwh || 0) : 0) / Math.max(0.25, nowMin / 60);
+      let impMore = 0;
+      for (let m = Math.ceil(nowMin / 30) * 30; m < 1440; m += 30) {
+        const offNow = ((tp.off) || []).some((w) => m >= w.s && m < w.e);
+        impMore += (impKw * 0.5 * (offNow ? (tp.offP || 0) : (tp.onP || 0))) / 100;
+      }
+      const proj = net + impMore - expMore;
+      ftxt = "projected end of day " + (proj < 0 ? "\u2212" : "") + gbp(Math.abs(proj)) +
+        (proj < 0 ? " credit" : " cost") + " \u00b7 " + rest.length + " export slot(s) left ~" +
+        kwhMore.toFixed(1) + " kWh = " + gbp(expMore) + " \u00b7 import to come ~" + gbp(impMore);
+    }
+    el("netFcast").textContent = ftxt;
+  }
 }
 function populateRange(period){
   const sel=el('range');
