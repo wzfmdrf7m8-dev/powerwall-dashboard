@@ -893,7 +893,8 @@ function renderNet(d){
     let ftxt = "";
     // selDay is block-scoped further up, so read the selection from the DOM
     const selNow = ((el("range") || {}).value) || "";
-    if (selNow === today && net != null) {
+    const todayStr = String(d.generated_at || "").slice(0, 10);
+    if (selNow === todayStr && net != null) {
       const EXPORT_KW = 7;
       const packKwh = 13.5 * (((d.site_info || {}).battery_count) || 4);
       const tp = d.tariff_push || {};
@@ -911,7 +912,7 @@ function renderNet(d){
         avail -= kwh; kwhMore += kwh;
         expMore += (kwh * ((tp.real && tp.real[h] != null) ? tp.real[h] : 0)) / 100;
       }
-      const dRow = ((d.octopus || {}).daily || []).find((x) => x.d === today);
+      const dRow = ((d.octopus || {}).daily || []).find((x) => x.d === todayStr);
       const impKw = (dRow ? (dRow.impKwh || 0) : 0) / Math.max(0.25, nowMin / 60);
       let impMore = 0;
       for (let m = Math.ceil(nowMin / 30) * 30; m < 1440; m += 30) {
