@@ -561,7 +561,7 @@ function initFlow3D(){
           sunOn:true,moonOn:false,cloudTarget:0.06,wetTarget:0,snow:false,snowPrev:false,speed:6.5};
   // tado reports the sky condition, not whether the sun is up - it still says SUN
   // at half nine at night. Work out day and night from the real solar elevation.
-  const LAT=53.39, LON=-2.55;   // Warrington
+  const LAT=53.4, LON=-2.6;   // Warrington
   const solarElev=(date)=>{
     const rad=Math.PI/180,deg=180/Math.PI;
     const n=date.getTime()/86400000+2440587.5-2451545.0;
