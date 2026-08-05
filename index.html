@@ -891,7 +891,9 @@ function renderNet(d){
   // draw forward, priced at each remaining slot's own buy rate.
   if (el("netFcast")) {
     let ftxt = "";
-    if (selDay === today && net != null) {
+    // selDay is block-scoped further up, so read the selection from the DOM
+    const selNow = ((el("range") || {}).value) || "";
+    if (selNow === today && net != null) {
       const EXPORT_KW = 7;
       const packKwh = 13.5 * (((d.site_info || {}).battery_count) || 4);
       const tp = d.tariff_push || {};
