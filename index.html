@@ -910,14 +910,29 @@ function renderNet(d){
         if (avail <= 0) break;
         const kwh = Math.min(EXPORT_KW * 0.5, avail);
         avail -= kwh; kwhMore += kwh;
-        expMore += (kwh * ((tp.real && tp.real[h] != null) ? tp.real[h] : 0)) / 100;
+        // renderNet works in pence throughout, so no divide by 100 here
+        expMore += kwh * ((tp.real && tp.real[h] != null) ? tp.real[h] : 0);
       }
-      const dRow = ((d.octopus || {}).daily || []).find((x) => x.d === todayStr);
-      const impKw = (dRow ? (dRow.impKwh || 0) : 0) / Math.max(0.25, nowMin / 60);
+      // Household draw for the rest of the day, taken from the last hour of
+      // telemetry. The day-so-far average is useless here - it is dominated by the
+      // overnight car charge and the battery filling from grid, neither of which
+      // repeats during the day.
+      let e1h = 0, span1h = 0, prevT = null;
+      const cutoff = Date.now() - 3600000;
+      for (const p of d.history || []) {
+        const ts = new Date(p.t).getTime();
+        if (!ts || ts < cutoff || ts > Date.now()) continue;
+        if (prevT != null) {
+          const dh = Math.min(Math.max((ts - prevT) / 3600000, 0), 0.25);
+          span1h += dh; e1h += (Math.max(0, p.grid || 0) / 1000) * dh;
+        }
+        prevT = ts;
+      }
+      const impKw = span1h > 0.05 ? e1h / span1h : 0;
       let impMore = 0;
       for (let m = Math.ceil(nowMin / 30) * 30; m < 1440; m += 30) {
         const offNow = ((tp.off) || []).some((w) => m >= w.s && m < w.e);
-        impMore += (impKw * 0.5 * (offNow ? (tp.offP || 0) : (tp.onP || 0))) / 100;
+        impMore += impKw * 0.5 * (offNow ? (tp.offP || 0) : (tp.onP || 0));
       }
       const proj = net + impMore - expMore;
       ftxt = "projected end of day " + (proj < 0 ? "\u2212" : "") + gbp(Math.abs(proj)) +
