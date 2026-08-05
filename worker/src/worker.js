@@ -874,11 +874,24 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     // restarts mid-slot: the stash is lost, the restore never runs and pv_only
     // latches on indefinitely. That is exactly what happened overnight, and it
     // would have blocked the battery from exporting all of the next day.
-    await setExportRule(
-      inSlot && slotMode === "hold"
-        ? cfg.ohme_hold_export || "pv_only"
-        : cfg.ohme_export_normal || "battery_ok",
-      inSlot && slotMode === "hold" ? "ohme slot, hold" : "no hold in effect");
+    const holdNow = inSlot && slotMode === "hold";
+    const wantExport = holdNow
+      ? cfg.ohme_hold_export || "pv_only"
+      : cfg.ohme_export_normal || "battery_ok";
+    const haveExport = (siteInfo.components || {}).customer_preferred_export_rule;
+    await setExportRule(wantExport, holdNow ? "ohme slot, hold" : "no hold in effect");
+    // Watchdog. pv_only with no hold in effect means either something outside this
+    // worker set it, or our own correction is failing. It is completely silent and
+    // it costs a whole day of export, so count consecutive cycles and surface it
+    // rather than quietly fixing it and moving on.
+    if (haveExport === "pv_only" && wantExport !== "pv_only") {
+      state.exportStuck = (state.exportStuck || 0) + 1;
+      if (state.exportStuck === 1 || state.exportStuck % 15 === 0)
+        log.push("WARNING: export was pv_only with no hold in effect (" +
+          state.exportStuck + " cycle(s)) - corrected to " + wantExport);
+    } else {
+      state.exportStuck = 0;
+    }
     if (inSlot && slotMode === "hold") {
       // Hold: the cheap import is for the car. Don't pull the Powerwall up on it,
       // and stop the battery exporting so it isn't discharging into a half-hour
@@ -1314,6 +1327,7 @@ async function pollCycle(env, state, opts = {}) {
     hp: state.hp || null,
     pw_health: Object.values(state.pwHealth || {}).sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-400),
     tariff_push: await lastTariffPush(env, state),
+    export_stuck: state.exportStuck || 0,
     source: "cloudflare-worker",
   };
   const enc = await encryptBundle(state, bundle);
