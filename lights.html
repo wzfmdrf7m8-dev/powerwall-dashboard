@@ -164,7 +164,14 @@ function render(h) {
   const msgs = [];
   if (li.ikea_error) msgs.push('IKEA hub: ' + li.ikea_error);
   if (!li.ikea && !li.ikea_error) msgs.push('IKEA hub not reporting.');
-  if (Date.now() / 1000 - (li.t || 0) > 180) msgs.push('Light data is stale — the NAS agent may have stopped.');
+  // Measure the agent against the bundle, not against the clock. The worker
+  // only rebuilds /home every minute or two, so a perfectly healthy agent is
+  // always a bundle-latency behind and a wall-clock test cries wolf.
+  // generated_at carries no zone and is written in local time, so let the
+  // browser parse it as local - appending Z would shift it an hour in BST and
+  // the check would silently never fire.
+  const bundleT = Date.parse(h.generated_at) / 1000 || Date.now() / 1000;
+  if (li.t && bundleT - li.t > 300) msgs.push('Light data is stale — the NAS agent may have stopped.');
   warn(msgs.join(' · '), msgs.length > 0);
 
   // rooms first, then anything the bridge does not place in a room
