@@ -263,6 +263,9 @@ def main():
                         state["tradfri"] = tradfri_state(creds)
                     except Exception as exc:
                         state["tradfri_error"] = str(exc)[:160]
+                        # log it too - storing it only in the payload meant a
+                        # failing tradfri leg looked like a healthy silent container
+                        print(f"[tradfri] {type(exc).__name__}: {exc}", flush=True)
                 put(s3, STATE_OBJ, state)
                 last_push = time.time()
         except Exception as exc:
