@@ -163,6 +163,16 @@ def snapshot():
                     o["remaining"] = opt.get("value")
         except Exception:
             o["program"] = None  # nothing running is the normal case
+        # The two ovens do not offer the same programs - the combi adds
+        # microwave power levels - so publish each list and let the page be
+        # driven by it rather than hardcoding a menu that will drift.
+        try:
+            o["programs"] = [p["key"] for p in
+                             api(f"/homeappliances/{hid}/programs/available")
+                             .get("data", {}).get("programs", [])]
+        except Exception as exc:
+            o["programs"] = []
+            print(f"[snap] {hid} programs: {exc}", flush=True)
         out[hid] = o
     return out
 
