@@ -1496,6 +1496,19 @@ async function runCommand(env, state, command, value) {
     await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/grid_import_export`,
       { customer_preferred_export_rule: rule });
     log.push(`export rule -> ${rule} (manual)`);
+  } else if (command === "light") {
+    // Queue for the NAS agent rather than acting here - the bridge is not
+    // reachable from Cloudflare. The agent clears the queue as it picks it up.
+    let q = { cmds: [] };
+    try {
+      const qo = await env.PW.get("lightcmd.json");
+      if (qo) q = JSON.parse(await qo.text()) || q;
+    } catch (e) {}
+    if (!Array.isArray(q.cmds)) q.cmds = [];
+    q.cmds.push(value);
+    q.t = Math.floor(Date.now() / 1000);
+    await env.PW.put("lightcmd.json", JSON.stringify(q));
+    log.push("light queued: " + JSON.stringify(value).slice(0, 70));
   } else if (command === "ohme_mode") {
     state.config.ohme_slot_mode = ["hold", "charge", "auto"].indexOf(value) >= 0 ? value : "auto";
     log.push(`ohme slot mode -> ${state.config.ohme_slot_mode}`);
@@ -1908,6 +1921,14 @@ async function refreshHome(env, state, log) {
   try { home.eero = await fetchEero(env, state); } catch (e) { home.eero = { ...(home.eero || {}), error: String(e).slice(0, 140) }; }
   home.oura = state.oura || { error: "Oura not connected yet" };
   home.sleepLog = state.sleepLog || [];
+  // Lights come from the NAS agent via R2. Both hubs are LAN-only, so the worker
+  // never talks to them directly - it just relays whatever the agent published.
+  try {
+    const lo = await env.PW.get("lights.json");
+    home.lights = lo ? JSON.parse(await lo.text()) : null;
+  } catch (e) {
+    home.lights = { error: String(e).slice(0, 120) };
+  }
   try {
     await env.PW.put("home.enc", await encryptBundle(state, { generated_at: localOffsetISO().slice(0, 19), ...home }));
   } catch (e) { log.push("home blob error: " + String(e).slice(0, 80)); }
