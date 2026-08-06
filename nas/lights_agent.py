@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -193,6 +194,7 @@ def dirigera_pair(host):
                                 "code_challenge_method": "S256"})
     code = dhttp(host, "/oauth/authorize?" + q)["code"]
     print("[dirigera] PRESS THE ACTION BUTTON on the underside of the hub", flush=True)
+    last = None
     deadline = time.time() + 180
     while time.time() < deadline:
         try:
@@ -203,10 +205,24 @@ def dirigera_pair(host):
                 jwrite(f"{CFG}/dirigera_token.json", {"token": tok["access_token"]})
                 print("[dirigera] paired, token saved", flush=True)
                 return tok["access_token"]
-        except Exception:
-            pass
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode()[:200]
+            except Exception:
+                pass
+            msg = f"HTTP {exc.code} {body}"
+            if msg != last:
+                print(f"[dirigera] waiting: {msg}", flush=True)
+                last = msg
+        except Exception as exc:
+            msg = f"{type(exc).__name__}: {exc}"
+            if msg != last:
+                print(f"[dirigera] waiting: {msg}", flush=True)
+                last = msg
         time.sleep(3)
-    raise RuntimeError("action button not pressed within 3 minutes")
+    # never assume it was the button - say what the hub actually replied
+    raise RuntimeError(f"pairing timed out. Last reply from hub: {last}")
 
 
 def dirigera_token(host):
