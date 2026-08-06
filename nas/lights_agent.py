@@ -16,6 +16,7 @@ The Hue key is minted here rather than pasted in, so it never travels through a
 chat log or a config file anyone has to copy by hand.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -147,49 +148,53 @@ def hue_apply(host, key, cmd):
 
 # ------------------------------------------------------------ tradfri
 
-def tradfri_setup():
+def tradfri_creds():
+    """Config only. The connection itself is made per poll, inside asyncio."""
     host = os.environ.get("TRADFRI_HOST", "")
     code = os.environ.get("TRADFRI_CODE", "")
     if not host or not code:
         return None
-    try:
-        from pytradfri.api.libcoap_api import APIFactory
-    except Exception:
-        try:
-            from pytradfri.api.aiocoap_api import APIFactory
-        except Exception as exc:
-            print(f"[tradfri] no CoAP backend available: {exc}", flush=True)
-            return None
-    saved = jread(f"{CFG}/tradfri_psk.json")
-    try:
-        if saved:
-            factory = APIFactory(host=host, psk_id=saved["identity"], psk=saved["psk"])
-        else:
-            ident = f"pwdash-{int(time.time())}"
-            factory = APIFactory(host=host, psk_id=ident)
-            psk = factory.generate_psk(code)
-            jwrite(f"{CFG}/tradfri_psk.json", {"identity": ident, "psk": psk})
-            print("[tradfri] paired, psk saved", flush=True)
-        return factory
-    except Exception as exc:
-        print(f"[tradfri] setup failed: {exc}", flush=True)
-        return None
+    return {"host": host, "code": code, "saved": jread(f"{CFG}/tradfri_psk.json")}
 
 
-def tradfri_state(factory):
+async def _tradfri_async(creds):
+    """aiocoap backend, deliberately not libcoap.
+
+    libcoap shells out to a coap-client binary that Debian's slim image does not
+    carry and that no obvious package provides on arm64. aiocoap is pure Python
+    and installs cleanly, so there is nothing extra to build or find at runtime.
+    """
     from pytradfri import Gateway
-    gw = Gateway()
-    api = factory.request
-    devices = api(gw.get_devices())
-    devices = api(devices)
-    out = {}
-    for d in devices:
-        if not getattr(d, "has_light_control", False):
-            continue
-        lc = d.light_control.lights[0]
-        out[str(d.id)] = {"name": d.name, "on": lc.state,
-                          "bri": lc.dimmer, "reachable": bool(d.reachable)}
-    return out
+    from pytradfri.api.aiocoap_api import APIFactory
+
+    host, saved = creds["host"], creds["saved"]
+    if saved:
+        factory = await APIFactory.init(host, psk_id=saved["identity"], psk=saved["psk"])
+    else:
+        ident = f"pwdash-{int(time.time())}"
+        factory = await APIFactory.init(host, psk_id=ident)
+        psk = await factory.generate_psk(creds["code"])
+        jwrite(f"{CFG}/tradfri_psk.json", {"identity": ident, "psk": psk})
+        creds["saved"] = {"identity": ident, "psk": psk}
+        print("[tradfri] paired, psk saved", flush=True)
+    try:
+        api = factory.request
+        gw = Gateway()
+        devices = await api(await api(gw.get_devices()))
+        out = {}
+        for d in devices:
+            if not getattr(d, "has_light_control", False):
+                continue
+            lc = d.light_control.lights[0]
+            out[str(d.id)] = {"name": d.name, "on": lc.state,
+                              "bri": lc.dimmer, "reachable": bool(d.reachable)}
+        return out
+    finally:
+        await factory.shutdown()
+
+
+def tradfri_state(creds):
+    return asyncio.run(_tradfri_async(creds))
 
 
 # ----------------------------------------------------------------- r2
@@ -235,7 +240,7 @@ def main():
     if not host:
         raise SystemExit("HUE_HOST not set")
     key = hue_key(host)
-    factory = tradfri_setup()
+    creds = tradfri_creds()
 
     s3 = r2()
     last_push = 0.0
@@ -253,9 +258,9 @@ def main():
 
             if time.time() - last_push >= PUSH_EVERY:
                 state = {"t": int(time.time()), "hue": hue_state(host, key)}
-                if factory:
+                if creds:
                     try:
-                        state["tradfri"] = tradfri_state(factory)
+                        state["tradfri"] = tradfri_state(creds)
                     except Exception as exc:
                         state["tradfri_error"] = str(exc)[:160]
                 put(s3, STATE_OBJ, state)
