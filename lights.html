@@ -46,6 +46,8 @@ input[type=range]{width:110px;accent-color:var(--sun)}
 .scene{padding:5px 10px;border-radius:999px;border:1px solid var(--edge);background:var(--bg);
   font-size:12px;cursor:pointer}
 .scene:active{background:var(--txt);color:#fff}
+.badge{font-size:10px;font-weight:600;letter-spacing:.04em;padding:2px 7px;border-radius:999px;
+  background:var(--bg);color:var(--dim);border:1px solid var(--edge)}
 .banner{background:#fff4e5;border:1px solid #ffd8a8;color:#7a4a00;border-radius:12px;padding:10px 14px;
   font-size:13px;margin-bottom:14px}
 .err{background:#ffe9e7;border-color:#ffc4bd;color:#8a1c10}
@@ -109,12 +111,13 @@ function ago(ts) {
   return Math.round(s / 3600) + 'h ago';
 }
 
-function toggle(kind, id, on, node) {
-  const key = kind + ':' + id;
+function toggle(kind, id, on, node, hub) {
+  hub = hub || 'hue';
+  const key = hub + ':' + kind + ':' + id;
   node.classList.add('busy');
   pending.set(key, { on, at: Date.now() });
   node.classList.toggle('on', on);
-  send({ target: kind, id, on })
+  send({ hub, target: kind, id, on })
     .then(() => setTimeout(load, 2500))
     .catch((e) => {
       node.classList.remove('busy');
@@ -123,8 +126,22 @@ function toggle(kind, id, on, node) {
     });
 }
 
-function dim(kind, id, bri) {
-  send({ target: kind, id, bri }).then(() => setTimeout(load, 2500)).catch(() => {});
+function dim(kind, id, bri, hub) {
+  send({ hub: hub || 'hue', target: kind, id, bri })
+    .then(() => setTimeout(load, 2500)).catch(() => {});
+}
+
+// IKEA has no group endpoint, so a room switch is just every bulb in the room
+async function iroom(room, on, node) {
+  node.classList.add('busy');
+  pending.set('ikea:room:' + room, { on, at: Date.now() });
+  node.classList.toggle('on', on);
+  const ids = (window.__IKROOMS || {})[room] || [];
+  for (const id of ids) {
+    pending.set('ikea:light:' + id, { on, at: Date.now() });
+    try { await send({ hub: 'ikea', target: 'light', id, on }); } catch (e) {}
+  }
+  setTimeout(load, 2500);
 }
 
 function warn(msg, bad) {
@@ -136,14 +153,17 @@ function render(h) {
   if (!li) { warn('No light data yet. Is the NAS agent running?', true); return; }
   const hue = li.hue || { lights: {}, groups: {}, scenes: {} };
   const L = hue.lights || {}, G = hue.groups || {}, S = hue.scenes || {};
+  const IK = li.ikea || {};
 
-  const nOn = Object.values(L).filter((x) => x.on).length;
-  const nDead = Object.values(L).filter((x) => x.reachable === false).length;
-  el('sub').textContent = Object.keys(L).length + ' lights · ' + nOn + ' on'
+  const all = Object.values(L).concat(Object.values(IK));
+  const nOn = all.filter((x) => x.on).length;
+  const nDead = all.filter((x) => x.reachable === false).length;
+  el('sub').textContent = all.length + ' lights · ' + nOn + ' on'
     + (nDead ? ' · ' + nDead + ' unreachable' : '') + ' · updated ' + ago(li.t);
 
   const msgs = [];
   if (li.ikea_error) msgs.push('IKEA hub: ' + li.ikea_error);
+  if (!li.ikea && !li.ikea_error) msgs.push('IKEA hub not reporting.');
   if (Date.now() / 1000 - (li.t || 0) > 180) msgs.push('Light data is stale — the NAS agent may have stopped.');
   warn(msgs.join(' · '), msgs.length > 0);
 
@@ -155,39 +175,70 @@ function render(h) {
   rooms.forEach(([, g]) => (g.lights || []).forEach((x) => placed.add(String(x))));
   const orphans = Object.keys(L).filter((id) => !placed.has(String(id)));
 
-  const lightRow = (id) => {
-    const l = L[id]; if (!l) return '';
+  // hub matters twice over: IKEA dims 1-100 where Hue dims 1-254, and the
+  // agent needs to be told which bridge a command is for
+  const lightRow = (id, hub) => {
+    const l = (hub === 'ikea' ? IK : L)[id]; if (!l) return '';
     const dead = l.reachable === false;
-    const on = pending.has('light:' + id) ? pending.get('light:' + id).on : !!l.on;
+    const key = hub + ':light:' + id;
+    const on = pending.has(key) ? pending.get(key).on : !!l.on;
+    const max = hub === 'ikea' ? 100 : 254;
     return '<div class="light' + (on ? '' : ' off') + (dead ? ' dead' : '') + '">'
       + '<div class="nm">' + esc(l.name || ('#' + id)) + '</div>'
       + (on && l.bri != null && !dead
-          ? '<input type="range" min="1" max="254" value="' + l.bri + '" data-bri="' + id + '">' : '')
-      + '<div class="sw sm' + (on ? ' on' : '') + '" data-light="' + id + '" data-on="' + (on ? 1 : 0) + '"'
+          ? '<input type="range" min="1" max="' + max + '" value="' + Math.min(l.bri, max)
+            + '" data-bri="' + id + '" data-hub="' + hub + '">' : '')
+      + '<div class="sw sm' + (on ? ' on' : '') + '" data-light="' + id + '" data-hub="' + hub
+      + '" data-on="' + (on ? 1 : 0) + '"'
       + (dead ? ' title="unreachable"' : '') + '><i></i></div></div>';
   };
 
   let html = '';
   for (const [gid, g] of rooms) {
     const ids = (g.lights || []).map(String);
-    const anyOn = pending.has('group:' + gid) ? pending.get('group:' + gid).on : !!g.any_on;
+    const anyOn = pending.has('hue:group:' + gid) ? pending.get('hue:group:' + gid).on : !!g.any_on;
     const scenes = Object.entries(S).filter(([, s]) => String(s.group) === String(gid)).slice(0, 6);
     html += '<div class="card room"><div class="roomhead">'
-      + '<h2>' + esc(g.name) + '</h2><div class="spacer"></div>'
+      + '<h2>' + esc(g.name) + '</h2><span class="badge">HUE</span><div class="spacer"></div>'
       + '<span class="count">' + ids.filter((i) => L[i] && L[i].on).length + '/' + ids.length + '</span>'
       + '<div class="sw' + (anyOn ? ' on' : '') + '" data-group="' + gid + '" data-on="' + (anyOn ? 1 : 0) + '"><i></i></div>'
       + '</div>'
-      + ids.map(lightRow).join('')
+      + ids.map((i) => lightRow(i, 'hue')).join('')
       + (scenes.length ? '<div class="scenes">' + scenes.map(([sid, s]) =>
           '<span class="scene" data-scene="' + sid + '" data-group="' + gid + '">' + esc(s.name) + '</span>').join('') + '</div>' : '')
       + '</div>';
   }
   if (orphans.length) {
     html += '<div class="card room"><div class="roomhead"><h2>Not in a room</h2>'
+      + '<span class="badge">HUE</span>'
       + '<div class="spacer"></div><span class="count">' + orphans.length + '</span></div>'
-      + orphans.map(lightRow).join('') + '</div>';
+      + orphans.map((i) => lightRow(i, 'hue')).join('') + '</div>';
   }
+
+  // IKEA: the hub exposes devices with a room name but no group or scene
+  // objects, so rooms are assembled here and a room switch just fans out to
+  // each bulb in it.
+  const ikRooms = {};
+  Object.keys(IK).forEach((id) => {
+    const r = IK[id].room || 'Not in a room';
+    (ikRooms[r] = ikRooms[r] || []).push(id);
+  });
+  Object.keys(ikRooms).sort((a, b) => ikRooms[b].length - ikRooms[a].length).forEach((r) => {
+    const ids = ikRooms[r];
+    const live = ids.filter((i) => IK[i].on).length;
+    const pk = 'ikea:room:' + r;
+    const anyOn = pending.has(pk) ? pending.get(pk).on : live > 0;
+    html += '<div class="card room"><div class="roomhead">'
+      + '<h2>' + esc(r) + '</h2><span class="badge">IKEA</span><div class="spacer"></div>'
+      + '<span class="count">' + live + '/' + ids.length + '</span>'
+      + '<div class="sw' + (anyOn ? ' on' : '') + '" data-iroom="' + esc(r) + '" data-on="'
+      + (anyOn ? 1 : 0) + '"><i></i></div></div>'
+      + ids.map((i) => lightRow(i, 'ikea')).join('')
+      + '</div>';
+  });
+
   el('rooms').innerHTML = html;
+  window.__IKROOMS = ikRooms;
   wire();
 }
 
@@ -198,13 +249,16 @@ function esc(s) {
 
 function wire() {
   document.querySelectorAll('[data-light]').forEach((n) =>
-    n.onclick = () => toggle('light', n.dataset.light, n.dataset.on !== '1', n));
+    n.onclick = () => toggle('light', n.dataset.light, n.dataset.on !== '1', n, n.dataset.hub));
   document.querySelectorAll('[data-group]').forEach((n) => {
     if (n.dataset.scene) return;
-    n.onclick = () => toggle('group', n.dataset.group, n.dataset.on !== '1', n);
+    n.onclick = () => toggle('group', n.dataset.group, n.dataset.on !== '1', n, 'hue');
+  });
+  document.querySelectorAll('[data-iroom]').forEach((n) => {
+    n.onclick = () => iroom(n.dataset.iroom, n.dataset.on !== '1', n);
   });
   document.querySelectorAll('[data-bri]').forEach((n) => {
-    n.onchange = () => dim('light', n.dataset.bri, +n.value);
+    n.onchange = () => dim('light', n.dataset.bri, +n.value, n.dataset.hub);
   });
   document.querySelectorAll('[data-scene]').forEach((n) => {
     n.onclick = () => {
@@ -215,11 +269,15 @@ function wire() {
 }
 
 el('allOff').onclick = async () => {
-  const G = (STATE && STATE.lights && STATE.lights.hue && STATE.lights.hue.groups) || {};
+  const li = (STATE && STATE.lights) || {};
+  const G = ((li.hue || {}).groups) || {};
   for (const [gid, g] of Object.entries(G)) {
     if (g.type === 'Room' && (g.lights || []).length) {
-      try { await send({ target: 'group', id: gid, on: false }); } catch (e) {}
+      try { await send({ hub: 'hue', target: 'group', id: gid, on: false }); } catch (e) {}
     }
+  }
+  for (const id of Object.keys(li.ikea || {})) {
+    try { await send({ hub: 'ikea', target: 'light', id, on: false }); } catch (e) {}
   }
   setTimeout(load, 2500);
 };
