@@ -183,45 +183,60 @@ def dhttp(host, path, method="GET", token=None, body=None, form=None, timeout=10
 def dirigera_pair(host):
     """DIRIGERA replaced Tradfri's CoAP with HTTPS and an OAuth-style handshake.
     There is no security code on this generation - you press the action button
-    on the underside of the hub while the token exchange is retrying."""
+    on the underside of the hub while the token exchange is retrying.
+
+    A fresh authorisation code is fetched every round. The hub expires them in
+    well under a minute, so one code cannot span a long wait - holding a single
+    code is what produced "Pairing request timed out" then "Invalid
+    authorization code" on the first attempt.
+    """
     import secrets
     import string
     alphabet = string.ascii_letters + string.digits + "_-"
-    verifier = "".join(secrets.choice(alphabet) for _ in range(128))
-    q = urllib.parse.urlencode({"audience": "homesmart.local",
-                                "response_type": "code",
-                                "code_challenge": verifier,
-                                "code_challenge_method": "S256"})
-    code = dhttp(host, "/oauth/authorize?" + q)["code"]
     print("[dirigera] PRESS THE ACTION BUTTON on the underside of the hub", flush=True)
     last = None
-    deadline = time.time() + 180
+    deadline = time.time() + 300
     while time.time() < deadline:
+        verifier = "".join(secrets.choice(alphabet) for _ in range(128))
+        q = urllib.parse.urlencode({"audience": "homesmart.local",
+                                    "response_type": "code",
+                                    "code_challenge": verifier,
+                                    "code_challenge_method": "S256"})
         try:
-            tok = dhttp(host, "/oauth/token", "POST", form={
-                "code": code, "name": "powerwall-dashboard",
-                "grant_type": "authorization_code", "code_verifier": verifier})
-            if tok and tok.get("access_token"):
-                jwrite(f"{CFG}/dirigera_token.json", {"token": tok["access_token"]})
-                print("[dirigera] paired, token saved", flush=True)
-                return tok["access_token"]
-        except urllib.error.HTTPError as exc:
-            body = ""
-            try:
-                body = exc.read().decode()[:200]
-            except Exception:
-                pass
-            msg = f"HTTP {exc.code} {body}"
-            if msg != last:
-                print(f"[dirigera] waiting: {msg}", flush=True)
-                last = msg
+            code = dhttp(host, "/oauth/authorize?" + q)["code"]
         except Exception as exc:
-            msg = f"{type(exc).__name__}: {exc}"
-            if msg != last:
-                print(f"[dirigera] waiting: {msg}", flush=True)
-                last = msg
-        time.sleep(3)
-    # never assume it was the button - say what the hub actually replied
+            print(f"[dirigera] authorize failed: {exc}", flush=True)
+            time.sleep(3)
+            continue
+        for _ in range(7):
+            if time.time() > deadline:
+                break
+            try:
+                tok = dhttp(host, "/oauth/token", "POST", form={
+                    "code": code, "name": "powerwall-dashboard",
+                    "grant_type": "authorization_code", "code_verifier": verifier})
+                if tok and tok.get("access_token"):
+                    jwrite(f"{CFG}/dirigera_token.json", {"token": tok["access_token"]})
+                    print("[dirigera] paired, token saved", flush=True)
+                    return tok["access_token"]
+            except urllib.error.HTTPError as exc:
+                body = ""
+                try:
+                    body = exc.read().decode()[:160]
+                except Exception:
+                    pass
+                msg = f"HTTP {exc.code} {body}"
+                if msg != last:
+                    print(f"[dirigera] waiting: {msg}", flush=True)
+                    last = msg
+                if exc.code == 401:
+                    break  # this code is dead, go round and get a fresh one
+            except Exception as exc:
+                msg = f"{type(exc).__name__}: {exc}"
+                if msg != last:
+                    print(f"[dirigera] waiting: {msg}", flush=True)
+                    last = msg
+            time.sleep(3)
     raise RuntimeError(f"pairing timed out. Last reply from hub: {last}")
 
 
