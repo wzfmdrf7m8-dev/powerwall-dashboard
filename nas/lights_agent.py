@@ -8,9 +8,9 @@ polls R2 for commands the dashboard has queued and executes them locally.
 
 Secrets never pass through the repo:
   /cfg-r2/vaillant.env   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   (shared)
-  /cfg/lights.env        TRADFRI_HOST, TRADFRI_CODE
+  /cfg/lights.env        DIRIGERA_HOST (TRADFRI_HOST accepted as an alias)
   /cfg/hue_key.json      written by this script on first pairing
-  /cfg/tradfri_psk.json  written by this script on first pairing
+  /cfg/dirigera_token.json  written by this script on first pairing
 
 The Hue key is minted here rather than pasted in, so it never travels through a
 chat log or a config file anyone has to copy by hand.
@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 import boto3
@@ -146,55 +147,97 @@ def hue_apply(host, key, cmd):
     return http(f"http://{host}/api/{key}/lights/{cid}/state", "PUT", body)
 
 
-# ------------------------------------------------------------ tradfri
+# ------------------------------------------------------- ikea dirigera
 
-def tradfri_creds():
-    """Config only. The connection itself is made per poll, inside asyncio."""
-    host = os.environ.get("TRADFRI_HOST", "")
-    code = os.environ.get("TRADFRI_CODE", "")
-    if not host or not code:
-        return None
-    return {"host": host, "code": code, "saved": jread(f"{CFG}/tradfri_psk.json")}
+DIRIGERA_PORT = 8443
 
 
-async def _tradfri_async(creds):
-    """aiocoap backend, deliberately not libcoap.
-
-    libcoap shells out to a coap-client binary that Debian's slim image does not
-    carry and that no obvious package provides on arm64. aiocoap is pure Python
-    and installs cleanly, so there is nothing extra to build or find at runtime.
-    """
-    from pytradfri import Gateway
-    from pytradfri.api.aiocoap_api import APIFactory
-
-    host, saved = creds["host"], creds["saved"]
-    if saved:
-        factory = await APIFactory.init(host, psk_id=saved["identity"], psk=saved["psk"])
-    else:
-        ident = f"pwdash-{int(time.time())}"
-        factory = await APIFactory.init(host, psk_id=ident)
-        psk = await factory.generate_psk(creds["code"])
-        jwrite(f"{CFG}/tradfri_psk.json", {"identity": ident, "psk": psk})
-        creds["saved"] = {"identity": ident, "psk": psk}
-        print("[tradfri] paired, psk saved", flush=True)
-    try:
-        api = factory.request
-        gw = Gateway()
-        devices = await api(await api(gw.get_devices()))
-        out = {}
-        for d in devices:
-            if not getattr(d, "has_light_control", False):
-                continue
-            lc = d.light_control.lights[0]
-            out[str(d.id)] = {"name": d.name, "on": lc.state,
-                              "bri": lc.dimmer, "reachable": bool(d.reachable)}
-        return out
-    finally:
-        await factory.shutdown()
+def _dctx():
+    """The hub serves a self-signed cert on its own LAN address, so verification
+    would fail by design. We are pinned to a fixed private IP either way."""
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 
-def tradfri_state(creds):
-    return asyncio.run(_tradfri_async(creds))
+def dhttp(host, path, method="GET", token=None, body=None, form=None, timeout=10):
+    url = f"https://{host}:{DIRIGERA_PORT}/v1{path}"
+    headers, data = {}, None
+    if form is not None:
+        data = urllib.parse.urlencode(form).encode()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout, context=_dctx()) as r:
+        raw = r.read().decode()
+        return json.loads(raw) if raw else None
+
+
+def dirigera_pair(host):
+    """DIRIGERA replaced Tradfri's CoAP with HTTPS and an OAuth-style handshake.
+    There is no security code on this generation - you press the action button
+    on the underside of the hub while the token exchange is retrying."""
+    import secrets
+    import string
+    alphabet = string.ascii_letters + string.digits + "_-"
+    verifier = "".join(secrets.choice(alphabet) for _ in range(128))
+    q = urllib.parse.urlencode({"audience": "homesmart.local",
+                                "response_type": "code",
+                                "code_challenge": verifier,
+                                "code_challenge_method": "S256"})
+    code = dhttp(host, "/oauth/authorize?" + q)["code"]
+    print("[dirigera] PRESS THE ACTION BUTTON on the underside of the hub", flush=True)
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        try:
+            tok = dhttp(host, "/oauth/token", "POST", form={
+                "code": code, "name": "powerwall-dashboard",
+                "grant_type": "authorization_code", "code_verifier": verifier})
+            if tok and tok.get("access_token"):
+                jwrite(f"{CFG}/dirigera_token.json", {"token": tok["access_token"]})
+                print("[dirigera] paired, token saved", flush=True)
+                return tok["access_token"]
+        except Exception:
+            pass
+        time.sleep(3)
+    raise RuntimeError("action button not pressed within 3 minutes")
+
+
+def dirigera_token(host):
+    saved = jread(f"{CFG}/dirigera_token.json")
+    if saved and saved.get("token"):
+        return saved["token"]
+    return dirigera_pair(host)
+
+
+def dirigera_state(host, token):
+    out = {}
+    for d in dhttp(host, "/devices", token=token) or []:
+        if d.get("deviceType") != "light" and d.get("type") != "light":
+            continue
+        a = d.get("attributes", {})
+        out[d.get("id")] = {"name": a.get("customName") or a.get("model"),
+                            "on": a.get("isOn"), "bri": a.get("lightLevel"),
+                            "reachable": bool(d.get("isReachable", True)),
+                            "room": (d.get("room") or {}).get("name")}
+    return out
+
+
+def dirigera_apply(host, token, cmd):
+    attrs = {}
+    if "on" in cmd:
+        attrs["isOn"] = bool(cmd["on"])
+    if cmd.get("bri") is not None:
+        attrs["lightLevel"] = max(1, min(100, int(cmd["bri"])))
+        attrs["isOn"] = True
+    return dhttp(host, f"/devices/{cmd['id']}", "PATCH", token=token,
+                 body=[{"attributes": attrs}])
 
 
 # ----------------------------------------------------------------- r2
@@ -240,7 +283,13 @@ def main():
     if not host:
         raise SystemExit("HUE_HOST not set")
     key = hue_key(host)
-    creds = tradfri_creds()
+    dhost = os.environ.get("DIRIGERA_HOST") or os.environ.get("TRADFRI_HOST", "")
+    dtoken = None
+    if dhost:
+        try:
+            dtoken = dirigera_token(dhost)
+        except Exception as exc:
+            print(f"[dirigera] pairing failed: {exc}", flush=True)
 
     s3 = r2()
     last_push = 0.0
@@ -250,7 +299,10 @@ def main():
             if cmds:
                 for c in cmds:
                     try:
-                        hue_apply(host, key, c)
+                        if c.get("hub") == "ikea" and dtoken:
+                            dirigera_apply(dhost, dtoken, c)
+                        else:
+                            hue_apply(host, key, c)
                         print(f"[cmd] {c}", flush=True)
                     except Exception as exc:
                         print(f"[cmd] FAILED {c}: {exc}", flush=True)
@@ -258,14 +310,14 @@ def main():
 
             if time.time() - last_push >= PUSH_EVERY:
                 state = {"t": int(time.time()), "hue": hue_state(host, key)}
-                if creds:
+                if dhost and dtoken:
                     try:
-                        state["tradfri"] = tradfri_state(creds)
+                        state["ikea"] = dirigera_state(dhost, dtoken)
                     except Exception as exc:
-                        state["tradfri_error"] = str(exc)[:160]
+                        state["ikea_error"] = str(exc)[:160]
                         # log it too - storing it only in the payload meant a
-                        # failing tradfri leg looked like a healthy silent container
-                        print(f"[tradfri] {type(exc).__name__}: {exc}", flush=True)
+                        # failing hub leg looked like a healthy silent container
+                        print(f"[ikea] {type(exc).__name__}: {exc}", flush=True)
                 put(s3, STATE_OBJ, state)
                 last_push = time.time()
         except Exception as exc:
