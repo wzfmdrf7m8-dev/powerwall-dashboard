@@ -114,7 +114,11 @@ const TARIFFISH=9; // rough blended p/kWh for the estimate line
 function render(d){
   const v=d.vaillant||{};
   el('err').textContent=v.error?('vaillant: '+v.error):'';
-  el('sub').textContent=(v.outdoor!=null?`outdoor ${v.outdoor.toFixed(1)}° · `:'')+'updated '+(d.generated_at||'').slice(11,16);
+  el('sub').textContent=(v.outdoor!=null?`outdoor ${v.outdoor.toFixed(1)}° · `:'')+'updated '+((v.t || d.generated_at)||'').slice(11,16);
+  // the bundle refreshes every minute even when the Vaillant login is down,
+  // so the reading itself can be half an hour old while the page looks live
+  const vAge = v.t ? Math.round((Date.now() - new Date(v.t).getTime()) / 60000) : null;
+  if (vAge != null && vAge > 10) el('sub').textContent += ' \u00b7 stale by ' + vAge + 'm';
   const cards=[];
   if(v.power!=null) cards.push(card('Drawing now',(v.power/1000).toFixed(2)+' kW',v.power>100?'running':'standby',v.power>100?'warn':'ok'));
   if(v.flowTemp!=null) cards.push(card('Flow temperature',v.flowTemp.toFixed(0)+'°',''));
