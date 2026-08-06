@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ovens</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#f5f5f7">
+<style>
+:root{--bg:#f5f5f7;--card:#ffffff;--edge:rgba(0,0,0,.05);--txt:#1d1d1f;--dim:#6e6e73;
+  --mint:#34c759;--sun:#ff9500;--cyan:#007aff;--pink:#ff3b30;--violet:#af52de}
+*{box-sizing:border-box;margin:0}
+body{color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  padding:24px 20px;max-width:1150px;margin:auto;background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased}
+h1{font-size:26px;letter-spacing:-.022em;font-weight:700}
+.sub{color:var(--dim);font-size:13px}
+header{display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+header .spacer{flex:1}
+.card{background:var(--card);border:1px solid var(--edge);border-radius:18px;padding:18px;
+  box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06);margin-bottom:16px}
+nav.pages{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+nav.pages a{padding:6px 12px;border-radius:999px;background:var(--card);border:1px solid var(--edge);
+  text-decoration:none;color:var(--txt);font-size:13px}
+nav.pages a.on{background:var(--txt);color:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:16px}
+.ovhead{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.ovhead h2{font-size:17px;font-weight:650;letter-spacing:-.01em}
+.ovhead .spacer{flex:1}
+.badge{font-size:10px;font-weight:600;letter-spacing:.04em;padding:2px 7px;border-radius:999px;
+  background:var(--bg);color:var(--dim);border:1px solid var(--edge)}
+.badge.run{background:#e8f9ee;color:#1a7f3c;border-color:#bfe9cf}
+.badge.off{background:var(--bg)}
+.badge.warn{background:#fff4e5;color:#7a4a00;border-color:#ffd8a8}
+.rows{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px;margin-bottom:12px}
+.rows dt{color:var(--dim)}
+.rows dd{margin:0}
+.bar{height:6px;border-radius:999px;background:var(--bg);overflow:hidden;margin:8px 0 12px}
+.bar i{display:block;height:100%;background:var(--sun)}
+fieldset{border:1px solid var(--edge);border-radius:14px;padding:12px 14px;margin:0}
+legend{font-size:12px;color:var(--dim);padding:0 6px}
+.ctl{display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center;font-size:13px}
+select,input[type=number]{font:inherit;font-size:13px;padding:6px 8px;border-radius:9px;
+  border:1px solid var(--edge);background:var(--bg);color:var(--txt);width:100%}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button{font:inherit;font-size:13px;padding:8px 14px;border-radius:999px;border:1px solid var(--edge);
+  background:var(--card);cursor:pointer}
+button.primary{background:var(--txt);color:#fff;border-color:var(--txt)}
+button.danger{background:#fff;color:var(--pink);border-color:#ffc4bd}
+button:disabled{opacity:.45;cursor:not-allowed}
+.note{font-size:12px;color:var(--dim);margin-top:8px}
+.banner{background:#fff4e5;border:1px solid #ffd8a8;color:#7a4a00;border-radius:12px;padding:10px 14px;
+  font-size:13px;margin-bottom:14px}
+.err{background:#ffe9e7;border-color:#ffc4bd;color:#8a1c10}
+dialog{border:none;border-radius:18px;padding:0;max-width:440px;width:calc(100% - 40px);
+  box-shadow:0 20px 60px rgba(0,0,0,.3)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+.dlg{padding:20px}
+.dlg h3{font-size:18px;margin-bottom:8px}
+.dlg .what{background:var(--bg);border-radius:12px;padding:12px;margin:12px 0;font-size:14px}
+.dlg .what b{font-weight:650}
+</style>
+</head>
+<body>
+<nav class="pages">
+  <a href="./">⚡ Energy</a><a href="heating">🌡 Heating</a><a href="heatpump">♨️ Heat pump</a><a href="network">📶 Network</a><a href="octopus">🐙 Octopus</a><a href="oura">💍 Oura</a><a href="health">🔋 Battery</a><a href="ledger">📒 Ledger</a><a href="lights">💡 Lights</a><a class="on" href="ovens">🔥 Ovens</a>
+</nav>
+
+<header>
+  <div>
+    <h1>Ovens</h1>
+    <div class="sub" id="sub">loading…</div>
+  </div>
+</header>
+
+<div id="warn"></div>
+<div class="grid" id="grid"></div>
+
+<dialog id="confirm">
+  <div class="dlg">
+    <h3 id="cTitle">Confirm</h3>
+    <div class="sub" id="cWhy"></div>
+    <div class="what" id="cWhat"></div>
+    <div class="btns" style="justify-content:flex-end">
+      <button id="cNo">Cancel</button>
+      <button class="primary" id="cYes">Confirm</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+const API = 'https://powerwall-api.randlefamily.com';
+const el = (id) => document.getElementById(id);
+let PASS = localStorage.getItem('pw_pass') || '';
+let STATE = null;
+let BUSY = false;
+
+const E = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const tail = (s) => String(s || '').split('.').pop();
+
+function mins(sec) {
+  if (sec == null) return null;
+  const m = Math.round(sec / 60);
+  if (m < 60) return m + ' min';
+  return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+}
+
+async function decrypt(buf) {
+  const bin = atob(buf.trim());
+  const b = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
+  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(PASS), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: b.slice(0, 16), iterations: 200000, hash: 'SHA-256' },
+    km, { name: 'AES-CBC', length: 256 }, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: b.slice(16, 32) }, key, b.slice(32));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+async function send(cmd) {
+  const r = await fetch(API + '/cmd', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-auth': PASS },
+    body: JSON.stringify({ command: 'oven', value: JSON.stringify(cmd) })
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+// Every control action goes through here. An oven is not a light: nothing is
+// sent until the exact action has been spelled out and confirmed.
+function ask(title, why, whatHtml) {
+  return new Promise((resolve) => {
+    el('cTitle').textContent = title;
+    el('cWhy').textContent = why || '';
+    el('cWhat').innerHTML = whatHtml;
+    const dlg = el('confirm');
+    const yes = () => { cleanup(); dlg.close(); resolve(true); };
+    const no = () => { cleanup(); dlg.close(); resolve(false); };
+    function cleanup() {
+      el('cYes').removeEventListener('click', yes);
+      el('cNo').removeEventListener('click', no);
+      dlg.removeEventListener('cancel', no);
+    }
+    el('cYes').addEventListener('click', yes);
+    el('cNo').addEventListener('click', no);
+    dlg.addEventListener('cancel', no);
+    dlg.showModal();
+  });
+}
+
+function warn(msg, bad) {
+  el('warn').innerHTML = msg ? '<div class="banner' + (bad ? ' err' : '') + '">' + E(msg) + '</div>' : '';
+}
+
+async function act(cmd, title, why, whatHtml) {
+  if (BUSY) return;
+  if (!(await ask(title, why, whatHtml))) return;
+  BUSY = true;
+  render(STATE);
+  try {
+    await send(cmd);
+    warn('Sent. The oven usually reflects it within a few seconds.', false);
+  } catch (e) {
+    warn('Could not queue that: ' + e.message, true);
+  }
+  BUSY = false;
+  setTimeout(load, 3000);
+}
+
+function opState(o) {
+  const s = tail(o.status.OperationState || '');
+  return s || 'Unknown';
+}
+
+function card(hid, o) {
+  const st = o.status || {}, se = o.settings || {};
+  const running = opState(o) === 'Run';
+  const power = tail(se.PowerState || '') === 'On';
+  const remote = !!st.RemoteControlStartAllowed;
+  const door = tail(st.DoorState || '');
+  const progs = o.programs || [];
+  const temps = st.CurrentCavityTemperature;
+
+  const badge = !o.connected ? '<span class="badge warn">OFFLINE</span>'
+    : running ? '<span class="badge run">RUNNING</span>'
+    : '<span class="badge off">' + E(opState(o).toUpperCase()) + '</span>';
+
+  let rows = '<dl class="rows">'
+    + '<dt>Power</dt><dd>' + (power ? 'On' : 'Standby') + '</dd>'
+    + '<dt>Door</dt><dd>' + E(door || '—') + '</dd>'
+    + (temps != null ? '<dt>Cavity</dt><dd>' + E(temps) + '°C</dd>' : '')
+    + (o.program ? '<dt>Program</dt><dd>' + E(tail(o.program)) + '</dd>' : '')
+    + (o.remaining != null ? '<dt>Remaining</dt><dd>' + E(mins(o.remaining)) + '</dd>' : '')
+    + '</dl>';
+
+  if (running && o.progress != null) {
+    rows += '<div class="bar"><i style="width:' + Math.max(0, Math.min(100, o.progress)) + '%"></i></div>';
+  }
+
+  // The appliance interlock is the real gate, so say plainly when it is not armed
+  const gate = remote ? '' :
+    '<div class="note">Remote start is not armed on this oven, so Start is disabled. '
+    + 'Enable it on the appliance itself — it lapses deliberately, as a safety feature.</div>';
+
+  const opts = progs.map((p) =>
+    '<option value="' + E(p) + '">' + E(tail(p)) + '</option>').join('');
+
+  return '<div class="card"><div class="ovhead">'
+    + '<h2>' + E(o.name || 'Oven') + '</h2>' + badge
+    + '<div class="spacer"></div><span class="sub">' + E(o.model || '') + '</span></div>'
+    + rows
+    + '<fieldset><legend>Start a program</legend>'
+    + '<div class="ctl">'
+    + '<label>Program</label><select data-f="prog" data-h="' + E(hid) + '">' + opts + '</select>'
+    + '<label>Temperature</label><input type="number" data-f="temp" data-h="' + E(hid) + '" value="180" min="30" max="275" step="5">'
+    + '<label>Cook for (min)</label><input type="number" data-f="dur" data-h="' + E(hid) + '" value="30" min="1" max="1439">'
+    + '<label>Start in (min)</label><input type="number" data-f="delay" data-h="' + E(hid) + '" value="0" min="0" max="1439">'
+    + '</div>'
+    + '<div class="btns">'
+    + '<button class="primary" data-a="start" data-h="' + E(hid) + '"' + (remote && o.connected && !BUSY ? '' : ' disabled') + '>Start</button>'
+    + '<button class="danger" data-a="stop" data-h="' + E(hid) + '"' + (running && !BUSY ? '' : ' disabled') + '>Stop program</button>'
+    + '<button data-a="power" data-h="' + E(hid) + '"' + (o.connected && !BUSY ? '' : ' disabled') + '>'
+    + (power ? 'Switch to standby' : 'Switch on') + '</button>'
+    + '</div>' + gate
+    + '<div class="note">Set “Start in” to 0 to begin now. The delay is the oven’s own timer, '
+    + 'so it survives the dashboard or the NAS restarting.</div>'
+    + '</fieldset></div>';
+}
+
+function render(h) {
+  STATE = h;
+  const d = h && h.ovens;
+  if (!d) { warn('No oven data yet. Is the Home Connect agent running?', true); return; }
+  if (d.error) { warn('Oven feed: ' + d.error, true); return; }
+  const ovens = d.ovens || {};
+  const n = Object.keys(ovens).length;
+  const running = Object.values(ovens).filter((o) => opState(o) === 'Run').length;
+  el('sub').textContent = n + (n === 1 ? ' oven' : ' ovens') + ' · '
+    + (running ? running + ' running' : 'none running')
+    + ' · updated ' + ago(d.t);
+
+  const msgs = [];
+  const bundleT = Date.parse(h.generated_at) / 1000 || Date.now() / 1000;
+  if (d.t && bundleT - d.t > 300) msgs.push('Oven data is stale — the Home Connect agent may have stopped.');
+  Object.values(ovens).filter((o) => !o.connected)
+    .forEach((o) => msgs.push((o.name || 'An oven') + ' is offline.'));
+  if (msgs.length) warn(msgs.join(' '), true); else warn('');
+
+  el('grid').innerHTML = Object.entries(ovens).map(([hid, o]) => card(hid, o)).join('');
+  wire(ovens);
+}
+
+function ago(ts) {
+  if (!ts) return 'never';
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (s < 90) return s + 's ago';
+  if (s < 5400) return Math.round(s / 60) + 'm ago';
+  return Math.round(s / 3600) + 'h ago';
+}
+
+function fld(hid, f) {
+  return document.querySelector('[data-f="' + f + '"][data-h="' + CSS.escape(hid) + '"]');
+}
+
+function wire(ovens) {
+  document.querySelectorAll('[data-a]').forEach((b) => {
+    b.onclick = () => {
+      const hid = b.dataset.h, o = ovens[hid], nm = o.name || 'the oven';
+      if (b.dataset.a === 'power') {
+        const on = tail((o.settings || {}).PowerState || '') === 'On';
+        return act({ haId: hid, action: 'power', value: !on },
+          on ? 'Switch off?' : 'Switch on?',
+          'This only changes standby power, it does not cook anything.',
+          '<b>' + E(nm) + '</b> → ' + (on ? 'Standby' : 'On'));
+      }
+      if (b.dataset.a === 'stop') {
+        return act({ haId: hid, action: 'stop' },
+          'Stop the running program?',
+          'Whatever is cooking will stop heating immediately.',
+          '<b>' + E(nm) + '</b><br>Stop <b>' + E(tail(o.program) || 'current program') + '</b>');
+      }
+      // start
+      const prog = fld(hid, 'prog').value;
+      const temp = parseInt(fld(hid, 'temp').value, 10);
+      const dur = parseInt(fld(hid, 'dur').value, 10);
+      const delay = parseInt(fld(hid, 'delay').value, 10);
+      if (!(temp >= 30 && temp <= 275)) return warn('Temperature must be between 30 and 275°C.', true);
+      if (!(dur >= 1)) return warn('Cook time must be at least 1 minute.', true);
+      const when = delay > 0
+        ? 'in <b>' + delay + ' min</b> (about ' + new Date(Date.now() + delay * 60000)
+            .toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + ')'
+        : '<b>now</b>';
+      const options = [
+        { key: 'Cooking.Oven.Option.SetpointTemperature', value: temp, unit: '°C' },
+        { key: 'BSH.Common.Option.Duration', value: dur * 60, unit: 'seconds' }
+      ];
+      if (delay > 0) options.push(
+        { key: 'BSH.Common.Option.StartInRelative', value: delay * 60, unit: 'seconds' });
+      act({ haId: hid, action: 'start', key: prog, options },
+        'Start the oven?',
+        'This will heat a real appliance. Check nothing is inside that should not be.',
+        '<b>' + E(nm) + '</b><br>' + E(tail(prog)) + ' at <b>' + temp + '°C</b>'
+        + '<br>for <b>' + dur + ' min</b>, starting ' + when);
+    };
+  });
+}
+
+async function load() {
+  try {
+    const txt = await (await fetch(API + '/home', { cache: 'no-store' })).text();
+    render(await decrypt(txt));
+  } catch (e) {
+    if (!PASS) {
+      PASS = prompt('Dashboard password') || '';
+      if (PASS) { localStorage.setItem('pw_pass', PASS); return load(); }
+    }
+    el('sub').textContent = 'could not load: ' + e.message;
+  }
+}
+
+load();
+setInterval(() => { if (!BUSY && !el('confirm').open) load(); }, 15000);
+</script>
+</body>
+</html>
