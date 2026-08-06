@@ -1505,10 +1505,12 @@ async function runCommand(env, state, command, value) {
       if (qo) q = JSON.parse(await qo.text()) || q;
     } catch (e) {}
     if (!Array.isArray(q.cmds)) q.cmds = [];
-    q.cmds.push(value);
+    // runCommand stringifies value, so the page sends JSON and we parse it back
+    const lc = typeof value === "string" ? JSON.parse(value) : value;
+    q.cmds.push(lc);
     q.t = Math.floor(Date.now() / 1000);
     await env.PW.put("lightcmd.json", JSON.stringify(q));
-    log.push("light queued: " + JSON.stringify(value).slice(0, 70));
+    log.push("light queued: " + JSON.stringify(lc).slice(0, 70));
   } else if (command === "ohme_mode") {
     state.config.ohme_slot_mode = ["hold", "charge", "auto"].indexOf(value) >= 0 ? value : "auto";
     log.push(`ohme slot mode -> ${state.config.ohme_slot_mode}`);
