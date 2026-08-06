@@ -20,6 +20,7 @@ import asyncio
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -317,12 +318,30 @@ def main():
         raise SystemExit("HUE_HOST not set")
     key = hue_key(host)
     dhost = os.environ.get("DIRIGERA_HOST") or os.environ.get("TRADFRI_HOST", "")
-    dtoken = None
-    if dhost:
-        try:
-            dtoken = dirigera_token(dhost)
-        except Exception as exc:
-            print(f"[dirigera] pairing failed: {exc}", flush=True)
+    # Pairing must never gate the Hue loop. An unpaired hub once spun in
+    # authorize retries for minutes before the loop even started, which starved
+    # the state push and left the dashboard stale while Hue itself was
+    # perfectly healthy. So: only ever adopt a token that already exists, and
+    # run pairing off the hot path, in a daemon thread, and only when asked for
+    # by dropping a pair_dirigera flag file next to the config.
+    _saved = jread(f"{CFG}/dirigera_token.json") or {}
+    dst = {"token": _saved.get("token")}
+    _flag = f"{CFG}/pair_dirigera"
+    if dhost and not dst["token"] and os.path.exists(_flag):
+        def _pair():
+            try:
+                dst["token"] = dirigera_pair(dhost)
+            except Exception as exc:
+                print(f"[dirigera] pairing failed: {exc}", flush=True)
+            finally:
+                try:
+                    os.remove(_flag)
+                except OSError:
+                    pass
+        threading.Thread(target=_pair, daemon=True).start()
+    elif dhost and not dst["token"]:
+        print("[dirigera] not paired; skipping. Touch /cfg/pair_dirigera and "
+              "restart to pair.", flush=True)
 
     s3 = r2()
     last_push = 0.0
@@ -332,8 +351,8 @@ def main():
             if cmds:
                 for c in cmds:
                     try:
-                        if c.get("hub") == "ikea" and dtoken:
-                            dirigera_apply(dhost, dtoken, c)
+                        if c.get("hub") == "ikea" and dst["token"]:
+                            dirigera_apply(dhost, dst["token"], c)
                         else:
                             hue_apply(host, key, c)
                         print(f"[cmd] {c}", flush=True)
@@ -343,9 +362,9 @@ def main():
 
             if time.time() - last_push >= PUSH_EVERY:
                 state = {"t": int(time.time()), "hue": hue_state(host, key)}
-                if dhost and dtoken:
+                if dhost and dst["token"]:
                     try:
-                        state["ikea"] = dirigera_state(dhost, dtoken)
+                        state["ikea"] = dirigera_state(dhost, dst["token"])
                     except Exception as exc:
                         state["ikea_error"] = str(exc)[:160]
                         # log it too - storing it only in the payload meant a
