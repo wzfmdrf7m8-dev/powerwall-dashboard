@@ -252,14 +252,22 @@ def dirigera_token(host):
 
 def dirigera_state(host, token):
     out = {}
+    seen = {}
     for d in dhttp(host, "/devices", token=token) or []:
         if d.get("deviceType") != "light" and d.get("type") != "light":
             continue
         a = d.get("attributes", {})
-        out[d.get("id")] = {"name": a.get("customName") or a.get("model"),
+        room = (d.get("room") or {}).get("name")
+        # Most of these bulbs were never named in the IKEA app, so customName
+        # is empty and all 34 of them would render as an identical
+        # "TRADFRI bulb GU10 WW 400lm". Number them within their room so they
+        # can actually be told apart on the dashboard.
+        seen[room] = seen.get(room, 0) + 1
+        model = (a.get("model") or "light").replace("TRADFRI bulb ", "")
+        out[d.get("id")] = {"name": a.get("customName") or (model + " " + str(seen[room])),
                             "on": a.get("isOn"), "bri": a.get("lightLevel"),
                             "reachable": bool(d.get("isReachable", True)),
-                            "room": (d.get("room") or {}).get("name")}
+                            "room": room}
     return out
 
 
