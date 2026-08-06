@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lights</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#f5f5f7">
+<style>
+:root{--bg:#f5f5f7;--card:#ffffff;--edge:rgba(0,0,0,.05);--txt:#1d1d1f;--dim:#6e6e73;
+  --mint:#34c759;--sun:#ff9500;--cyan:#007aff;--pink:#ff3b30;--violet:#af52de}
+*{box-sizing:border-box;margin:0}
+body{color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+  padding:24px 20px;max-width:1150px;margin:auto;background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased}
+h1{font-size:26px;letter-spacing:-.022em;font-weight:700}
+.sub{color:var(--dim);font-size:13px}
+header{display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+header .spacer{flex:1}
+.card{background:var(--card);border:1px solid var(--edge);border-radius:18px;padding:18px;
+  box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06);margin-bottom:16px}
+nav.pages{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+nav.pages a{padding:6px 12px;border-radius:999px;background:var(--card);border:1px solid var(--edge);
+  text-decoration:none;color:var(--txt);font-size:13px}
+nav.pages a.on{background:var(--txt);color:#fff}
+.rooms{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px}
+.room h2{font-size:17px;font-weight:650;letter-spacing:-.01em}
+.roomhead{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.roomhead .spacer{flex:1}
+.count{color:var(--dim);font-size:12px}
+.sw{position:relative;width:50px;height:30px;border-radius:999px;border:1px solid var(--edge);
+  background:#e9e9eb;cursor:pointer;transition:background .18s;flex:none}
+.sw.on{background:var(--mint)}
+.sw i{position:absolute;top:2px;left:2px;width:24px;height:24px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .18s}
+.sw.on i{transform:translateX(20px)}
+.sw.busy{opacity:.45;pointer-events:none}
+.light{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--edge)}
+.light .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.light.off .nm{color:var(--dim)}
+.light.dead .nm{color:var(--dim);text-decoration:line-through}
+.sw.sm{width:42px;height:25px}
+.sw.sm i{width:19px;height:19px}
+.sw.sm.on i{transform:translateX(17px)}
+input[type=range]{width:110px;accent-color:var(--sun)}
+.scenes{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.scene{padding:5px 10px;border-radius:999px;border:1px solid var(--edge);background:var(--bg);
+  font-size:12px;cursor:pointer}
+.scene:active{background:var(--txt);color:#fff}
+.banner{background:#fff4e5;border:1px solid #ffd8a8;color:#7a4a00;border-radius:12px;padding:10px 14px;
+  font-size:13px;margin-bottom:14px}
+.err{background:#ffe9e7;border-color:#ffc4bd;color:#8a1c10}
+button.plain{font:inherit;padding:7px 14px;border-radius:999px;border:1px solid var(--edge);
+  background:var(--card);cursor:pointer}
+</style>
+</head>
+<body>
+<nav class="pages">
+  <a href="./">⚡ Energy</a><a href="heating">🌡 Heating</a><a href="heatpump">♨️ Heat pump</a><a href="network">📶 Network</a><a href="octopus">🐙 Octopus</a><a href="oura">💍 Oura</a><a href="health">🔋 Battery</a><a href="ledger">📒 Ledger</a><a class="on" href="lights">💡 Lights</a>
+</nav>
+
+<header>
+  <div>
+    <h1>Lights</h1>
+    <div class="sub" id="sub">loading…</div>
+  </div>
+  <div class="spacer"></div>
+  <button class="plain" id="allOff">All off</button>
+</header>
+
+<div id="warn"></div>
+<div class="rooms" id="rooms"></div>
+
+<script>
+const API = 'https://powerwall-api.randlefamily.com';
+const el = (id) => document.getElementById(id);
+let PASS = localStorage.getItem('pw_pass') || '';
+let STATE = null;
+// commands are optimistic: the agent needs a few seconds, so we show the new
+// position immediately and let the next poll confirm or correct it
+const pending = new Map();
+
+async function decrypt(buf) {
+  const bin = atob(buf.trim());
+  const b = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
+  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(PASS), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: b.slice(0, 16), iterations: 200000, hash: 'SHA-256' },
+    km, { name: 'AES-CBC', length: 256 }, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: b.slice(16, 32) }, key, b.slice(32));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+async function send(cmd) {
+  const r = await fetch(API + '/cmd', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-auth': PASS },
+    body: JSON.stringify({ command: 'light', value: JSON.stringify(cmd) })
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+function ago(ts) {
+  if (!ts) return 'never';
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (s < 90) return s + 's ago';
+  if (s < 5400) return Math.round(s / 60) + 'm ago';
+  return Math.round(s / 3600) + 'h ago';
+}
+
+function toggle(kind, id, on, node) {
+  const key = kind + ':' + id;
+  node.classList.add('busy');
+  pending.set(key, { on, at: Date.now() });
+  node.classList.toggle('on', on);
+  send({ target: kind, id, on })
+    .then(() => setTimeout(load, 2500))
+    .catch((e) => {
+      node.classList.remove('busy');
+      pending.delete(key);
+      warn('could not queue that: ' + e.message, true);
+    });
+}
+
+function dim(kind, id, bri) {
+  send({ target: kind, id, bri }).then(() => setTimeout(load, 2500)).catch(() => {});
+}
+
+function warn(msg, bad) {
+  el('warn').innerHTML = msg ? '<div class="banner' + (bad ? ' err' : '') + '">' + msg + '</div>' : '';
+}
+
+function render(h) {
+  const li = h.lights;
+  if (!li) { warn('No light data yet. Is the NAS agent running?', true); return; }
+  const hue = li.hue || { lights: {}, groups: {}, scenes: {} };
+  const L = hue.lights || {}, G = hue.groups || {}, S = hue.scenes || {};
+
+  const nOn = Object.values(L).filter((x) => x.on).length;
+  const nDead = Object.values(L).filter((x) => x.reachable === false).length;
+  el('sub').textContent = Object.keys(L).length + ' lights · ' + nOn + ' on'
+    + (nDead ? ' · ' + nDead + ' unreachable' : '') + ' · updated ' + ago(li.t);
+
+  const msgs = [];
+  if (li.ikea_error) msgs.push('IKEA hub: ' + li.ikea_error);
+  if (Date.now() / 1000 - (li.t || 0) > 180) msgs.push('Light data is stale — the NAS agent may have stopped.');
+  warn(msgs.join(' · '), msgs.length > 0);
+
+  // rooms first, then anything the bridge does not place in a room
+  const rooms = Object.entries(G)
+    .filter(([, g]) => g.type === 'Room' && (g.lights || []).length)
+    .sort((a, b) => (b[1].lights || []).length - (a[1].lights || []).length);
+  const placed = new Set();
+  rooms.forEach(([, g]) => (g.lights || []).forEach((x) => placed.add(String(x))));
+  const orphans = Object.keys(L).filter((id) => !placed.has(String(id)));
+
+  const lightRow = (id) => {
+    const l = L[id]; if (!l) return '';
+    const dead = l.reachable === false;
+    const on = pending.has('light:' + id) ? pending.get('light:' + id).on : !!l.on;
+    return '<div class="light' + (on ? '' : ' off') + (dead ? ' dead' : '') + '">'
+      + '<div class="nm">' + esc(l.name || ('#' + id)) + '</div>'
+      + (on && l.bri != null && !dead
+          ? '<input type="range" min="1" max="254" value="' + l.bri + '" data-bri="' + id + '">' : '')
+      + '<div class="sw sm' + (on ? ' on' : '') + '" data-light="' + id + '" data-on="' + (on ? 1 : 0) + '"'
+      + (dead ? ' title="unreachable"' : '') + '><i></i></div></div>';
+  };
+
+  let html = '';
+  for (const [gid, g] of rooms) {
+    const ids = (g.lights || []).map(String);
+    const anyOn = pending.has('group:' + gid) ? pending.get('group:' + gid).on : !!g.any_on;
+    const scenes = Object.entries(S).filter(([, s]) => String(s.group) === String(gid)).slice(0, 6);
+    html += '<div class="card room"><div class="roomhead">'
+      + '<h2>' + esc(g.name) + '</h2><div class="spacer"></div>'
+      + '<span class="count">' + ids.filter((i) => L[i] && L[i].on).length + '/' + ids.length + '</span>'
+      + '<div class="sw' + (anyOn ? ' on' : '') + '" data-group="' + gid + '" data-on="' + (anyOn ? 1 : 0) + '"><i></i></div>'
+      + '</div>'
+      + ids.map(lightRow).join('')
+      + (scenes.length ? '<div class="scenes">' + scenes.map(([sid, s]) =>
+          '<span class="scene" data-scene="' + sid + '" data-group="' + gid + '">' + esc(s.name) + '</span>').join('') + '</div>' : '')
+      + '</div>';
+  }
+  if (orphans.length) {
+    html += '<div class="card room"><div class="roomhead"><h2>Not in a room</h2>'
+      + '<div class="spacer"></div><span class="count">' + orphans.length + '</span></div>'
+      + orphans.map(lightRow).join('') + '</div>';
+  }
+  el('rooms').innerHTML = html;
+  wire();
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function wire() {
+  document.querySelectorAll('[data-light]').forEach((n) =>
+    n.onclick = () => toggle('light', n.dataset.light, n.dataset.on !== '1', n));
+  document.querySelectorAll('[data-group]').forEach((n) => {
+    if (n.dataset.scene) return;
+    n.onclick = () => toggle('group', n.dataset.group, n.dataset.on !== '1', n);
+  });
+  document.querySelectorAll('[data-bri]').forEach((n) => {
+    n.onchange = () => dim('light', n.dataset.bri, +n.value);
+  });
+  document.querySelectorAll('[data-scene]').forEach((n) => {
+    n.onclick = () => {
+      send({ target: 'group', id: n.dataset.group, scene: n.dataset.scene })
+        .then(() => setTimeout(load, 2500)).catch(() => {});
+    };
+  });
+}
+
+el('allOff').onclick = async () => {
+  const G = (STATE && STATE.lights && STATE.lights.hue && STATE.lights.hue.groups) || {};
+  for (const [gid, g] of Object.entries(G)) {
+    if (g.type === 'Room' && (g.lights || []).length) {
+      try { await send({ target: 'group', id: gid, on: false }); } catch (e) {}
+    }
+  }
+  setTimeout(load, 2500);
+};
+
+async function load() {
+  try {
+    const txt = await (await fetch(API + '/home', { cache: 'no-store' })).text();
+    STATE = await decrypt(txt);
+    // clear optimistic marks older than 15s so a failed command cannot stick
+    for (const [k, v] of pending) if (Date.now() - v.at > 15000) pending.delete(k);
+    render(STATE);
+  } catch (e) {
+    if (!PASS) {
+      PASS = prompt('Dashboard password') || '';
+      if (PASS) { localStorage.setItem('pw_pass', PASS); return load(); }
+    }
+    el('sub').textContent = 'could not load: ' + e.message;
+  }
+}
+
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
