@@ -1504,6 +1504,20 @@ async function runCommand(env, state, command, value) {
     await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/grid_import_export`,
       { customer_preferred_export_rule: rule });
     log.push(`export rule -> ${rule} (manual)`);
+  } else if (command === "oven") {
+    // Same relay pattern as lights: the agent owns the Home Connect session,
+    // so queue the command rather than calling the appliance from here.
+    let q = { cmds: [] };
+    try {
+      const qo = await env.PW.get("ovencmd.json");
+      if (qo) q = JSON.parse(await qo.text()) || q;
+    } catch (e) {}
+    if (!Array.isArray(q.cmds)) q.cmds = [];
+    const oc = typeof value === "string" ? JSON.parse(value) : value;
+    q.cmds.push(oc);
+    q.t = Math.floor(Date.now() / 1000);
+    await env.PW.put("ovencmd.json", JSON.stringify(q));
+    log.push("oven queued: " + JSON.stringify(oc).slice(0, 70));
   } else if (command === "light") {
     // Queue for the NAS agent rather than acting here - the bridge is not
     // reachable from Cloudflare. The agent clears the queue as it picks it up.
@@ -1956,6 +1970,15 @@ async function refreshHome(env, state, log) {
     home.lights = lo ? JSON.parse(await lo.text()) : null;
   } catch (e) {
     home.lights = { error: String(e).slice(0, 120) };
+  }
+  // Ovens come from the NAS agent too. Home Connect is a cloud API this worker
+  // could reach directly, but the cap is 1000 requests a day, so the agent
+  // holds the event stream and we only relay what it has already published.
+  try {
+    const oo = await env.PW.get("ovens.json");
+    home.ovens = oo ? JSON.parse(await oo.text()) : null;
+  } catch (e) {
+    home.ovens = { error: String(e).slice(0, 120) };
   }
   try {
     await env.PW.put("home.enc", await encryptBundle(state, { generated_at: localOffsetISO().slice(0, 19), ...home }));
