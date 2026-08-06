@@ -31,7 +31,13 @@ from myPyllant.api import MyPyllantAPI
 R2_ACCOUNT = os.environ["R2_ACCOUNT_ID"]
 R2_BUCKET = os.environ.get("R2_BUCKET", "powerwall-data")
 R2_OBJECT = os.environ.get("R2_OBJECT", "vailtok.json")
-INTERVAL = int(os.environ.get("INTERVAL_SECONDS", "21600"))  # 6h
+INTERVAL = int(os.environ.get("INTERVAL_SECONDS", "3600"))  # background floor
+REQ_OBJECT = os.environ.get("R2_REQ_OBJECT", "vailmint.json")
+CHECK = int(os.environ.get("CHECK_SECONDS", "45"))
+# Never log in more often than this when responding to requests. The worker
+# re-asks every couple of minutes while it is broken, and Vaillant's WAF is
+# not something to poke hundreds of times a day.
+MIN_GAP = int(os.environ.get("MIN_ONDEMAND_GAP", "300"))
 
 BRAND = os.environ.get("VAILLANT_BRAND", "vaillant")
 COUNTRY = os.environ.get("VAILLANT_COUNTRY", "unitedkingdom")
@@ -80,8 +86,8 @@ async def mint():
         return extract(api)
 
 
-def publish(token):
-    s3 = boto3.client(
+def s3client():
+    return boto3.client(
         "s3",
         endpoint_url=f"https://{R2_ACCOUNT}.r2.cloudflarestorage.com",
         aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
@@ -89,7 +95,10 @@ def publish(token):
         config=Config(signature_version="s3v4"),
         region_name="auto",
     )
-    s3.put_object(
+
+
+def publish(token, s3=None):
+    (s3 or s3client()).put_object(
         Bucket=R2_BUCKET,
         Key=R2_OBJECT,
         Body=json.dumps(token).encode(),
@@ -97,13 +106,27 @@ def publish(token):
     )
 
 
+def mint_requested(s3, since):
+    """The worker drops a flag in R2 when its token chain has died.
+
+    Minting on demand beats simply polling faster: recovery drops from hours to
+    about a minute, without logging in to Vaillant hundreds of times a day.
+    """
+    try:
+        o = s3.get_object(Bucket=R2_BUCKET, Key=REQ_OBJECT)
+        body = json.loads(o["Body"].read().decode())
+    except Exception:
+        return None
+    return body if int(body.get("want") or 0) > since else None
+
+
 def stamp():
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def run_once():
+def run_once(s3=None):
     token = asyncio.run(mint())
-    publish(token)
+    publish(token, s3)
     print(
         f"[{stamp()}] minted -> r2://{R2_BUCKET}/{R2_OBJECT} "
         f"(refresh_token: {'yes' if token['refresh'] else 'NO'}, "
@@ -117,9 +140,29 @@ if __name__ == "__main__":
         run_once()
         sys.exit(0)
 
+    s3 = s3client()
+    last = 0.0
+    # ignore any request left over from before this process started
+    handled = int(time.time())
+    fails = 0
     while True:
-        try:
-            run_once()
-        except Exception as exc:  # keep the loop alive across transient failures
-            print(f"[{stamp()}] MINT FAILED: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-        time.sleep(INTERVAL)
+        now = time.time()
+        due = now - last >= INTERVAL
+        req = None
+        if not due and now - last >= MIN_GAP * min(2 ** fails, 8):
+            req = mint_requested(s3, handled)
+        if due or req:
+            if req:
+                print(f"[{stamp()}] mint requested: {str(req.get('why'))[:80]}", flush=True)
+            try:
+                run_once(s3)
+                last = time.time()
+                fails = 0
+            except Exception as exc:  # keep the loop alive across transient failures
+                fails += 1
+                last = time.time() if due else last
+                print(f"[{stamp()}] MINT FAILED: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            finally:
+                # mark the request seen either way, so a failure cannot spin
+                handled = int(time.time())
+        time.sleep(CHECK)
