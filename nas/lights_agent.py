@@ -208,7 +208,9 @@ def dirigera_pair(host):
             print(f"[dirigera] authorize failed: {exc}", flush=True)
             time.sleep(3)
             continue
-        for _ in range(7):
+        # keep each round short: the code dies in seconds, so the useful
+        # pattern is fresh-code-then-immediately-exchange, repeated quickly
+        for _ in range(2):
             if time.time() > deadline:
                 break
             try:
@@ -236,7 +238,7 @@ def dirigera_pair(host):
                 if msg != last:
                     print(f"[dirigera] waiting: {msg}", flush=True)
                     last = msg
-            time.sleep(3)
+            time.sleep(2)
     raise RuntimeError(f"pairing timed out. Last reply from hub: {last}")
 
 
