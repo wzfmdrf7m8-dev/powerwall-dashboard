@@ -923,6 +923,15 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
     const ohmeOk2 = state.ohmeData && !state.ohmeData.error;
     const nowIso2 = new Date().toISOString();
     const inSlot2 = ohmeOk2 && (state.ohmeData.slots || []).some((sl) => sl.start <= nowIso2 && nowIso2 < sl.end);
+    // Validate the token a few minutes before a slot lands. A failure here
+    // triggers the mint request while there is still time to recover, rather
+    // than discovering the problem at the moment we need to act.
+    const soonIso2 = new Date(Date.now() + 6 * 60000).toISOString().slice(0, nowIso2.length);
+    if (ohmeOk2 && !state.dhwBoosted && state.ohmeData.slots.some(
+          (sl) => sl.start > nowIso2 && sl.start <= soonIso2)) {
+      try { await vaillantToken(env, state); }
+      catch (e) { log.push("prewarm before ohme slot failed: " + String(e).slice(0, 60)); }
+    }
     console.log(`dhw: ohmeOk=${!!ohmeOk2} slots=${JSON.stringify((state.ohmeData || {}).slots || [])} now=${nowIso2} inSlot=${!!inSlot2} boosted=${state.dhwBoosted || 0}`);
     try {
       if (inSlot2 && !state.dhwBoosted) {
@@ -930,9 +939,8 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
         state.dhwPrev = cur >= 58 ? (state.dhwPrev ?? 45) : cur;   // never save a boosted target as "previous"
         await vaillantSetDhw(env, state, 60);
         // setpoint alone is passive — the boost forces heating now, regardless of the DHW schedule
-        try { await vaillantDhwBoost(env, state, true); log.push(`hot water -> 60° + boost on (ohme slot, was ${state.dhwPrev}°)`); }
+        try { await vaillantDhwBoost(env, state, true); log.push(`hot water -> 60° + boost on (ohme slot, was ${state.dhwPrev}°)`); state.dhwBoosted = 1; }
         catch (e) { log.push(`hot water -> 60°, boost failed: ${String(e).slice(0, 70)}`); }
-        state.dhwBoosted = 1;
       } else if (!inSlot2 && state.dhwBoosted) {
         await vaillantSetDhw(env, state, state.dhwPrev ?? 45);
         try { await vaillantDhwBoost(env, state, false); } catch (e) {}
@@ -1697,6 +1705,19 @@ async function vaillantLogin(env, state) {
   if (!j.access_token) throw new Error("vaillant token: " + JSON.stringify(j).slice(0, 120));
   return j;
 }
+// Throttled so a sustained outage cannot turn into hundreds of logins a day -
+// Vaillant's WAF is exactly what forced the minter onto the NAS in the first place.
+async function wantVaillantMint(env, state, why) {
+  const v = state.vaillant || (state.vaillant = {});
+  const now = Math.floor(Date.now() / 1000);
+  if (v.mintAskT && now - v.mintAskT < 120) return;
+  v.mintAskT = now;
+  try {
+    await env.PW.put("vailmint.json",
+      JSON.stringify({ want: now, why: String(why).slice(0, 80) }));
+  } catch (e) {}
+}
+
 async function vaillantToken(env, state) {
   const v = (state.vaillant = state.vaillant || {});
   const now = Date.now() / 1000;
@@ -1728,6 +1749,11 @@ async function vaillantToken(env, state) {
       }
     }
   } catch (e) {}
+  // A dead token chain only recovers from a fresh mint, and the NAS can log in
+  // from a residential IP where this worker cannot. Ask it to run now rather
+  // than wait for its next scheduled pass - otherwise an Ohme slot can land
+  // and pass with the hot water never boosted.
+  if (v.loginFailT) await wantVaillantMint(env, state, "login failing");
   if (v.loginFailT && now - v.loginFailT < 600) throw new Error("vaillant: login cooling down after failure");
   try {
     const j = await vaillantLogin(env, state);
