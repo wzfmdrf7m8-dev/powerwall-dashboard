@@ -17,8 +17,11 @@ chat log or a config file anyone has to copy by hand.
 """
 
 import asyncio
+import calendar
 import json
+import math
 import os
+import random
 import sys
 import threading
 import time
@@ -282,6 +285,210 @@ def dirigera_apply(host, token, cmd):
                  body=[{"attributes": attrs}])
 
 
+# ------------------------------------------------------------- holiday mode
+
+LAT = float(os.environ.get("HOME_LAT", "53.4"))
+LON = float(os.environ.get("HOME_LON", "-2.6"))
+HOL_FILE = f"{CFG}/holiday.json"
+DUSK_LEAD = 1200  # switch on 20 min before sunset, as a real household does
+
+_hol = {"on": False, "cur": None, "until": 0.0, "bedtime": 0.0,
+        "day": None, "lit": [], "recent": [], "why": "idle"}
+
+
+def sun_epoch(lat, lon, ts):
+    """Sunrise/sunset as epoch seconds for the UTC day containing ts.
+
+    Epoch-based on purpose: comparing darkness in epoch seconds sidesteps the
+    local-versus-UTC confusion that has caused real bugs in this project.
+    """
+    g = time.gmtime(ts)
+    gamma = 2 * math.pi / 365.0 * (g.tm_yday - 1 + (g.tm_hour - 12) / 24.0)
+    eqtime = 229.18 * (0.000075 + 0.001868 * math.cos(gamma) - 0.032077 * math.sin(gamma)
+                       - 0.014615 * math.cos(2 * gamma) - 0.040849 * math.sin(2 * gamma))
+    decl = (0.006918 - 0.399912 * math.cos(gamma) + 0.070257 * math.sin(gamma)
+            - 0.006758 * math.cos(2 * gamma) + 0.000907 * math.sin(2 * gamma)
+            - 0.002697 * math.cos(3 * gamma) + 0.00148 * math.sin(3 * gamma))
+    latr = math.radians(lat)
+    cosha = (math.cos(math.radians(90.833)) / (math.cos(latr) * math.cos(decl))
+             - math.tan(latr) * math.tan(decl))
+    if cosha > 1 or cosha < -1:
+        return None, None
+    ha = math.degrees(math.acos(cosha))
+    midnight = calendar.timegm((g.tm_year, g.tm_mon, g.tm_mday, 0, 0, 0, 0, 0, 0))
+    return (midnight + (720 - 4 * (lon + ha) - eqtime) * 60,
+            midnight + (720 - 4 * (lon - ha) - eqtime) * 60)
+
+
+def is_dark(ts):
+    rise, sett = sun_epoch(LAT, LON, ts)
+    if rise is None:
+        return True
+    return ts > (sett - DUSK_LEAD) or ts < rise
+
+
+def evening_window(ts):
+    """Dusk-to-bedtime only.
+
+    Darkness alone is not enough: at 00:30 it is pitch dark and technically
+    before tonight's bedtime, which would light the whole house at half
+    midnight. Anything before midday belongs to the previous night's session,
+    which has already finished.
+    """
+    return is_dark(ts) and time.localtime(ts).tm_hour >= 12
+
+
+WEIGHTS = [
+    (("kitchen", "lounge", "living", "dining", "dinning", "snug", "family"), 5),
+    (("hall", "landing", "stair", "study", "extension", "games", "den"), 2),
+    (("toilet", "bath", "shower", "wc", "utility"), 1),
+    (("bedroom", "bed"), 1),
+]
+
+
+def weight_for(name):
+    n = (name or "").lower()
+    for words, w in WEIGHTS:
+        if any(x in n for x in words):
+            return w
+    return 2
+
+
+def pick_next(rooms, current, rnd, recent=()):
+    """Weighted pick, avoiding the current room and damping recent ones.
+
+    Without the recent damping the chain ping-pongs between the two heaviest
+    rooms - lounge, kitchen, lounge, kitchen - which reads as machine generated
+    rather than as somebody moving around a house.
+    """
+    pool = [r for r in rooms if r != current] or list(rooms)
+    weights = []
+    for r in pool:
+        w = float(weight_for(r[2]))
+        if r in recent:
+            w /= (3.0 - list(recent).index(r) * 0.7)
+        weights.append(max(w, 0.15))
+    return rnd.choices(pool, weights=weights, k=1)[0]
+
+
+def bedtime_for(ts, rnd):
+    """Randomised lights-out between 22:30 and 23:45 local."""
+    lt = time.localtime(ts)
+    mins = 22 * 60 + 30 + rnd.randrange(0, 76)
+    return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday,
+                        mins // 60, mins % 60, 0, 0, 0, -1))
+
+
+def rooms_from(state):
+    """Every room across both hubs, as (hub, id, name)."""
+    out = []
+    for gid, g in ((state.get("hue") or {}).get("groups") or {}).items():
+        if g.get("type") == "Room" and (g.get("lights") or []):
+            out.append(("hue", gid, g.get("name") or ("Room " + gid)))
+    seen = set()
+    for d in (state.get("ikea") or {}).values():
+        r = d.get("room")
+        if r and r not in seen:
+            seen.add(r)
+            out.append(("ikea", r, r))
+    return out
+
+
+def hol_load():
+    _hol["on"] = bool((jread(HOL_FILE) or {}).get("on"))
+
+
+def hol_save():
+    jwrite(HOL_FILE, {"on": _hol["on"]})
+
+
+def hol_apply(room, on, ctx):
+    kind, ident, _ = room
+    if kind == "hue":
+        hue_apply(ctx["host"], ctx["key"], {"target": "group", "id": ident, "on": on})
+    elif ctx["dst"].get("token"):
+        for did, d in (ctx["ikea"] or {}).items():
+            if d.get("room") == ident:
+                dirigera_apply(ctx["dhost"], ctx["dst"]["token"], {"id": did, "on": on})
+
+
+def hol_all_off(ctx):
+    for room in list(_hol["lit"]):
+        try:
+            hol_apply(room, False, ctx)
+        except Exception as exc:
+            print(f"[holiday] could not switch off {room[2]}: {exc}", flush=True)
+    _hol["lit"] = []
+    _hol["cur"] = None
+
+
+def hol_tick(state, ctx):
+    now = time.time()
+    if not _hol["on"]:
+        if _hol["lit"]:
+            hol_all_off(ctx)
+            _hol["why"] = "switched off"
+        else:
+            _hol["why"] = "off"
+        return
+    rooms = rooms_from(state)
+    if not rooms:
+        _hol["why"] = "no rooms visible"
+        return
+
+    today = time.strftime("%Y-%m-%d", time.localtime(now))
+    if _hol["day"] != today:
+        _hol["day"] = today
+        _hol["bedtime"] = bedtime_for(now, random)
+
+    if not evening_window(now):
+        if _hol["lit"]:
+            hol_all_off(ctx)
+        _hol["why"] = "waiting for dusk"
+        return
+    if now >= _hol["bedtime"]:
+        if _hol["lit"]:
+            hol_all_off(ctx)
+            print("[holiday] bedtime - all off", flush=True)
+        _hol["why"] = "after bedtime"
+        return
+    if now < _hol["until"]:
+        _hol["why"] = "in " + (_hol["cur"][2] if _hol["cur"] else "?")
+        return
+
+    nxt = pick_next(rooms, _hol["cur"], random, tuple(_hol["recent"]))
+    # Occasionally leave the previous room on so two overlap - a real house
+    # often has the kitchen and lounge lit together, and strict
+    # one-room-at-a-time is its own kind of tell.
+    overlap = _hol["cur"] is not None and len(_hol["lit"]) < 2 and random.random() < 0.35
+    if _hol["cur"] is not None and not overlap:
+        hol_apply(_hol["cur"], False, ctx)
+        if _hol["cur"] in _hol["lit"]:
+            _hol["lit"].remove(_hol["cur"])
+    hol_apply(nxt, True, ctx)
+    if nxt not in _hol["lit"]:
+        _hol["lit"].append(nxt)
+    while len(_hol["lit"]) > 2:
+        oldest = _hol["lit"].pop(0)
+        if oldest != nxt:
+            hol_apply(oldest, False, ctx)
+    _hol["cur"] = nxt
+    _hol["recent"].insert(0, nxt)
+    del _hol["recent"][3:]
+    _hol["until"] = now + random.randrange(8 * 60, 35 * 60)
+    _hol["why"] = "in " + nxt[2]
+    print(f"[holiday] {nxt[2]} for {int((_hol['until'] - now) / 60)} min", flush=True)
+
+
+def hol_status():
+    rise, sett = sun_epoch(LAT, LON, time.time())
+    return {"on": _hol["on"], "why": _hol["why"],
+            "room": _hol["cur"][2] if _hol["cur"] else None,
+            "lit": [r[2] for r in _hol["lit"]],
+            "bedtime": int(_hol["bedtime"]) if _hol["bedtime"] else None,
+            "sunset": int(sett) if sett else None,
+            "sunrise": int(rise) if rise else None}
+
 # ----------------------------------------------------------------- r2
 
 def r2():
@@ -351,6 +558,9 @@ def main():
         print("[dirigera] not paired; skipping. Touch /cfg/pair_dirigera and "
               "restart to pair.", flush=True)
 
+    hol_load()
+    print(f"[holiday] mode is {'on' if _hol['on'] else 'off'} at start", flush=True)
+
     s3 = r2()
     last_push = 0.0
     while True:
@@ -359,7 +569,11 @@ def main():
             if cmds:
                 for c in cmds:
                     try:
-                        if c.get("hub") == "ikea" and dst["token"]:
+                        if c.get("target") == "holiday":
+                            _hol["on"] = bool(c.get("on"))
+                            hol_save()
+                            print(f"[holiday] switched {'on' if _hol['on'] else 'off'}", flush=True)
+                        elif c.get("hub") == "ikea" and dst["token"]:
                             dirigera_apply(dhost, dst["token"], c)
                         else:
                             hue_apply(host, key, c)
@@ -378,6 +592,12 @@ def main():
                         # log it too - storing it only in the payload meant a
                         # failing hub leg looked like a healthy silent container
                         print(f"[ikea] {type(exc).__name__}: {exc}", flush=True)
+                try:
+                    hol_tick(state, {"host": host, "key": key, "dhost": dhost,
+                                     "dst": dst, "ikea": state.get("ikea")})
+                except Exception as exc:
+                    print(f"[holiday] {type(exc).__name__}: {exc}", flush=True)
+                state["holiday"] = hol_status()
                 put(s3, STATE_OBJ, state)
                 last_push = time.time()
         except Exception as exc:
