@@ -51,6 +51,7 @@ input[type=range]{width:110px;accent-color:var(--sun)}
 .banner{background:#fff4e5;border:1px solid #ffd8a8;color:#7a4a00;border-radius:12px;padding:10px 14px;
   font-size:13px;margin-bottom:14px}
 .err{background:#ffe9e7;border-color:#ffc4bd;color:#8a1c10}
+button.plain.armed{background:var(--violet);color:#fff;border-color:var(--violet)}
 button.plain{font:inherit;padding:7px 14px;border-radius:999px;border:1px solid var(--edge);
   background:var(--card);cursor:pointer}
 </style>
@@ -66,6 +67,7 @@ button.plain{font:inherit;padding:7px 14px;border-radius:999px;border:1px solid 
     <div class="sub" id="sub">loading…</div>
   </div>
   <div class="spacer"></div>
+  <button class="plain" id="holidayBtn">Holiday mode</button>
   <button class="plain" id="allOff">All off</button>
 </header>
 
@@ -160,6 +162,8 @@ function render(h) {
   const nDead = all.filter((x) => x.reachable === false).length;
   el('sub').textContent = all.length + ' lights · ' + nOn + ' on'
     + (nDead ? ' · ' + nDead + ' unreachable' : '') + ' · updated ' + ago(li.t);
+
+  renderHoliday(li.holiday);
 
   const msgs = [];
   if (li.ikea_error) msgs.push('IKEA hub: ' + li.ikea_error);
@@ -274,6 +278,41 @@ function wire() {
     };
   });
 }
+
+// Holiday mode is owned by the NAS agent, not this page: it has to keep running
+// long after the tab is closed. The page only flips the flag and reports back
+// whatever the agent says it is doing.
+function renderHoliday(h) {
+  const b = el('holidayBtn');
+  if (!h) { b.textContent = 'Holiday mode'; b.classList.remove('armed'); return; }
+  b.classList.toggle('armed', !!h.on);
+  if (!h.on) {
+    b.textContent = 'Holiday mode';
+    b.title = 'Simulate someone being home after dark';
+    return;
+  }
+  const bed = h.bedtime ? new Date(h.bedtime * 1000)
+        .toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : null;
+  b.textContent = 'Holiday: ' + (h.room || h.why || 'on');
+  b.title = 'Lights follow a plausible pattern after dark'
+    + (bed ? ', all off around ' + bed : '')
+    + (h.lit && h.lit.length ? '. Lit now: ' + h.lit.join(', ') : '');
+}
+
+el('holidayBtn').onclick = async () => {
+  const cur = !!((((STATE || {}).lights) || {}).holiday || {}).on;
+  const b = el('holidayBtn');
+  b.disabled = true;
+  try {
+    await send({ target: 'holiday', on: !cur });
+    warn(cur ? 'Holiday mode off. Anything it switched on goes off shortly.'
+             : 'Holiday mode on. Nothing happens until dusk.', false);
+  } catch (e) {
+    warn('Could not change holiday mode: ' + e.message, true);
+  }
+  b.disabled = false;
+  setTimeout(load, 2500);
+};
 
 el('allOff').onclick = async () => {
   const li = (STATE && STATE.lights) || {};
