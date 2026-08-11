@@ -126,6 +126,15 @@ async function loadState(env) {
   if (!state.mig_plan1) { state.config.export_plan = { pence: 20, fromH: 16, toH: 22 }; state.mig_plan1 = 1; }
   // don't force export when the slot is genuinely poor — leave those at the real price
   if (!state.mig_plan2) { state.config.export_plan = { pence: 20, fromH: 16, toH: 22, minP: 12 }; state.mig_plan2 = 1; }
+  // The battery has been carrying a meaningful charge into the next day, so
+  // there is headroom to keep exporting for one more slot. 22:00-22:30 moves
+  // from "maybe, if the shoulder picker chooses it" to always 20p. Merged
+  // rather than replaced so any hand tuning of pence or minP survives.
+  if (!state.mig_plan3) {
+    state.config.export_plan = Object.assign({ pence: 20, fromH: 16, minP: 12 },
+                                             state.config.export_plan, { toH: 22.5 });
+    state.mig_plan3 = 1;
+  }
   // what the Powerwall does during an Ohme cheap slot: "charge" (existing) or
   // "hold" (leave the cheap import for the car, and stop the battery exporting)
   if (!state.mig_ohold1) {
