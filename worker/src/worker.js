@@ -422,7 +422,8 @@ async function fetchOctopus(env, state) {
           // charging sustains ≥4 kW for a half-hour — reprice those (≥2 kWh/HH).
           const bigDraw = (c.consumption || 0) >= 2.0;
           if ((ioSet.has(localKey) || bigDraw) && dayMin != null) rate = dayMin;
-          if (rate == null) rate = dayMin ?? 5.9; // inc-VAT night rate fallback
+          if (rate == null) rate = dayMin ?? 5.9;
+          if (inFreeSession(state, ts)) { rate = 0; d.freeKwh = (d.freeKwh || 0) + c.consumption; } // inc-VAT night rate fallback
           d.impKwh += c.consumption;
           d.impCost += c.consumption * rate;
           if (dayMin != null && rate <= dayMin + 0.01) d.offKwh += c.consumption; else d.peakKwh += c.consumption;
@@ -498,6 +499,7 @@ async function fetchOctopus(env, state) {
             const dm = minFor(dy);
             if ((ioSet.has(lm2.slice(0, 16)) || kwh >= 2.0) && dm != null) rate = dm;
             if (rate == null) rate = dm ?? 5.9;
+            if (inFreeSession(state, ts)) { rate = 0; dd.freeKwh = (dd.freeKwh || 0) + kwh; }
             dd.impKwh += kwh; dd.impCost += kwh * rate;
             if (dm != null && rate <= dm + 0.01) dd.offKwh += kwh; else dd.peakKwh += kwh;
             dd.cov = Math.max(dd.cov || 0, ts + 1800e3);
@@ -610,6 +612,42 @@ async function vaillantSetDhw(env, state, temp) {
    Buy side: IO Go off-peak window + currently granted Ohme slots at the off-peak
    rate, peak elsewhere. Sell side: today's 48 Agile Outgoing half-hours.
    Rewritten daily and whenever Ohme's granted slots change. */
+/* ---------------- octopus free electricity sessions ----------------
+   Octopus bills a free session at the normal rate and credits it back a week or
+   two later, so nothing in the tariff feed marks the hour. We hold the window
+   ourselves: drain the battery to make headroom beforehand, force-charge from
+   the grid through it, tell the Powerwall the power is free, and price it at 0p
+   in the ledger once it has run. */
+function londonOffMs(ms) {
+  const s = new Date(ms).toLocaleString("sv-SE", { timeZone: TZ }).replace(" ", "T") + "Z";
+  return Date.parse(s) - ms;
+}
+function londonStampMs(date, hm) {
+  const guess = Date.parse(date + "T" + hm + ":00Z");
+  if (isNaN(guess)) return NaN;
+  return guess - londonOffMs(guess);
+}
+function freeWindow(state) {
+  const f = ((state.config || {}).free_session) || null;
+  if (!f || !f.date || !f.start || !f.end) return null;
+  const s = londonStampMs(f.date, f.start), e = londonStampMs(f.date, f.end);
+  if (isNaN(s) || isNaN(e) || e <= s) return null;
+  return { s, e, date: f.date, start: f.start, end: f.end,
+    target: f.target != null ? f.target : 35, prepH: f.prepH != null ? f.prepH : 5 };
+}
+function freePhase(state, nowMs) {
+  const w = freeWindow(state);
+  if (!w) return { phase: "none", w: null };
+  const now = nowMs != null ? nowMs : Date.now();
+  if (now >= w.s && now < w.e) return { phase: "live", w };
+  if (now < w.s) return { phase: now >= w.s - w.prepH * 3600e3 ? "prep" : "waiting", w };
+  return { phase: "done", w };
+}
+// sessions that have already run — used to price those half-hours at 0p
+function inFreeSession(state, ms) {
+  for (const x of state.freeLog || []) if (ms >= x.s && ms < x.e) return true;
+  return false;
+}
 function tariffIntervals(state) {
   // half-hour marks for the current London day
   const marks = new Array(48).fill(false);
@@ -632,7 +670,20 @@ function tariffIntervals(state) {
   const on = []; let cur = 0;
   for (const x of off) { if (x.s > cur) on.push({ s: cur, e: x.s }); cur = x.e; }
   if (cur < 1440) on.push({ s: cur, e: 1440 });
-  return { off, on };
+  // a free-electricity hour is a 0p buy window that outranks both bands
+  const fw = freeWindow(state);
+  let free = [];
+  if (fw && fw.s >= base && fw.s < base + 86400e3) {
+    free = [{ s: Math.round((fw.s - base) / 60000), e: Math.min(1440, Math.round((fw.e - base) / 60000)) }];
+  }
+  const cut = (list) => (!free.length ? list : list.reduce((acc, iv) => {
+    const f = free[0];
+    if (iv.e <= f.s || iv.s >= f.e) return acc.concat([iv]);
+    if (iv.s < f.s) acc.push({ s: iv.s, e: f.s });
+    if (iv.e > f.e) acc.push({ s: f.e, e: iv.e });
+    return acc;
+  }, []));
+  return { off: cut(off), on: cut(on), free };
 }
 function touPeriods(intervals) {
   return { periods: intervals.map((iv) => ({
@@ -654,7 +705,7 @@ async function pushTariff(env, state, sid, log) {
       if (cur) { await env.PW.put("tariff_backup.json", JSON.stringify(cur)); state.tariffBackedUp = 1; }
     } catch (e) {}
   }
-  const { off, on } = tariffIntervals(state);
+  const { off, on, free } = tariffIntervals(state);
   const base = Date.parse(londonDayStartISO(new Date()));
   const sellAll = expRates.filter((r) => true);
   // Agile is always half-hourly, so a match against a long-span row means the real
@@ -784,8 +835,8 @@ async function pushTariff(env, state, sid, log) {
     utility: "Octopus Energy", code: "IOGO-AGILE-SYNC", name: "IO Go buy + Agile sell (auto-sync)", currency: "GBP",
     daily_charges: [{ name: "Charge", amount: 0 }], daily_demand_charges: {},
     demand_charges: { ALL: { rates: { ALL: 0 } }, AllYear: { rates: {} } },
-    energy_charges: { ALL: { rates: { ALL: 0 } }, AllYear: { rates: { OFF_PEAK: offP, ON_PEAK: onP } } },
-    seasons: { AllYear: { ...season, tou_periods: { OFF_PEAK: touPeriods(off), ON_PEAK: touPeriods(on) } } },
+    energy_charges: { ALL: { rates: { ALL: 0 } }, AllYear: { rates: { OFF_PEAK: offP, ON_PEAK: onP, ...(free.length ? { FREE: 0 } : {}) } } },
+    seasons: { AllYear: { ...season, tou_periods: { OFF_PEAK: touPeriods(off), ON_PEAK: touPeriods(on), ...(free.length ? { FREE: touPeriods(free) } : {}) } } },
     sell_tariff: {
       min_applicable_demand: 0, monthly_minimum_bill: 0, monthly_charges: 0, max_applicable_demand: 0,
       utility: "Octopus Energy", code: "AGILE-OUTGOING", name: "Agile Outgoing (auto-sync)", currency: "GBP",
@@ -798,7 +849,7 @@ async function pushTariff(env, state, sid, log) {
   await tesla(env, state, "POST", `/api/1/energy_sites/${sid}/time_of_use_settings`, { tou_settings: { tariff_content_v2: content } });
   state.tariffPushed = {
     t: localOffsetISO().slice(0, 19),
-    off, offP: Math.round(offP * 10000) / 100, onP: Math.round(onP * 10000) / 100,
+    off, free, offP: Math.round(offP * 10000) / 100, onP: Math.round(onP * 10000) / 100,
     sell: Array.from({ length: 48 }, (_, h) => Math.round(sellRates["R" + String(h).padStart(2, "0")] * 10000) / 100),
     missing: missing.length,
     plan: ocfg.pence > 0 ? { p: ocfg.pence, from: oFrom, to: oTo, minP, extra: planExtra, on: planOn } : null,
@@ -861,7 +912,37 @@ async function applyAutomation(env, state, sid, siteInfo, log) {
       log.push(`grid charging -> ${allowed} (${why})`);
     }
   };
-  if (cfg.follow_ohme_slots) {
+  // Octopus free electricity session — headroom first, then fill for free
+  const fp = freePhase(state);
+  const freeBusy = fp.phase === "prep" || fp.phase === "live";
+  const socNow = () => (((state.hist || [])[(state.hist || []).length - 1]) || {}).soc || 0;
+  if (fp.phase === "live") {
+    state.pwSlotCharge = null;
+    await setReserve(100, "free session - filling from the grid");
+    await setGridCharging(true, "free session");
+    if (!state.freeLive) {
+      state.freeLive = 1; state.freeStartSoc = socNow();
+      log.push("free session started, powerwall at " + state.freeStartSoc.toFixed(0) + "%");
+    }
+  } else if (fp.phase === "prep") {
+    const dayC = cfg.day || {};
+    const tgt = Math.max(dayC.reserve || 0, fp.w.target);
+    await setReserve(tgt, "free session - making headroom");
+    await setGridCharging(false, "free session prep - don't buy what is about to be free");
+    if (!state.freePrep) {
+      state.freePrep = 1;
+      log.push("free session in " + Math.round((fp.w.s - Date.now()) / 60000) + " min - draining to " + tgt + "%");
+    }
+  } else if ((state.freeLive || state.freePrep) && fp.w) {
+    if (state.freeLive) {
+      const end = socNow(), from = state.freeStartSoc || 0;
+      state.freeLog = (state.freeLog || []).concat([{ s: fp.w.s, e: fp.w.e, from, to: end }]).slice(-30);
+      state.lastOcto = 0; // reprice the day with the free hour at 0p
+      log.push("free session ended, powerwall " + from.toFixed(0) + "% -> " + end.toFixed(0) + "%");
+    }
+    state.freeLive = 0; state.freePrep = 0;
+  }
+  if (cfg.follow_ohme_slots && !freeBusy) {
     // fail-safe: if Ohme state is unknown/errored, treat as NOT in a slot so we
     // always revert to day settings rather than staying parked at 100% reserve
     const ohmeOk = state.ohmeData && !state.ohmeData.error;
@@ -1346,6 +1427,8 @@ async function pollCycle(env, state, opts = {}) {
     hp: state.hp || null,
     pw_health: Object.values(state.pwHealth || {}).sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-400),
     tariff_push: await lastTariffPush(env, state),
+    free_session: (() => { const p = freePhase(state);
+      return p.w ? { ...p.w, phase: p.phase, log: (state.freeLog || []).slice(-6) } : null; })(),
     export_stuck: state.exportStuck || 0,
     source: "cloudflare-worker",
   };
@@ -1548,6 +1631,18 @@ async function runCommand(env, state, command, value) {
   } else if (command === "follow_ohme") {
     state.config.follow_ohme_slots = value === "on";
     log.push(`follow ohme slots -> ${value}`);
+  } else if (command === "free_session") {
+    if (!value || value === "clear") {
+      state.config.free_session = null; state.freePrep = 0; state.freeLive = 0; state.tariffSig = null;
+      log.push("free session cleared");
+    } else {
+      const v = typeof value === "string" ? JSON.parse(value) : value;
+      state.config.free_session = { date: v.date, start: v.start, end: v.end,
+        target: Number(v.target != null ? v.target : 35), prepH: Number(v.prepH != null ? v.prepH : 5) };
+      state.freePrep = 0; state.freeLive = 0; state.tariffSig = null;
+      log.push("free session set: " + v.date + " " + v.start + "-" + v.end +
+        ", headroom to " + state.config.free_session.target + "%");
+    }
   } else if (command === "tariff_sync") {
     state.config.tariff_sync = state.config.tariff_sync || {};
     state.config.tariff_sync.enabled = value === "on";
