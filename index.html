@@ -1282,7 +1282,8 @@ document.addEventListener('visibilitychange',()=>{
 });
 el('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
 function setFree(){
-  const v={date:val('fsDate'),start:val('fsStart'),end:val('fsEnd'),target:+val('fsTarget')||35};
+  const tv=val('fsTarget');
+  const v={date:val('fsDate'),start:val('fsStart'),end:val('fsEnd'),target:(tv===''||isNaN(+tv))?35:+tv};
   if(!v.date||!v.start||!v.end){el('cmderr').textContent='Pick a date and a start and end time';return}
   cmd('free_session',JSON.stringify(v));
 }
