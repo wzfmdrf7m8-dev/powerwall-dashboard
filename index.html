@@ -248,6 +248,13 @@
   <button onclick="cmd('tariff_sync','on')">Tariff sync: ON</button>
   <button class="sec" onclick="cmd('tariff_sync','off')">OFF</button>
   <button class="sec" onclick="cmd('tariff_push','')">Push tariff now</button>
+  <button class="sec" onclick="if(confirm('Restore the original Tesla app tariff and disable sync?'))cmd('tariff_restore','')">Restore original</button>
+    <button class="sec" onclick="cmd('dhw_ohme','off')">OFF</button>
+    <button class="sec" onclick="cmd('tado_auth','')">Connect tado</button>
+    <input id="eeroEmail" type="email" placeholder="eero account email" style="width:180px"><button class="sec" onclick="cmd('eero_login',val('eeroEmail'))">Connect eero</button>
+    <input id="eeroCode" placeholder="eero code" style="width:100px"><button class="sec" onclick="cmd('eero_verify',val('eeroCode'))">Verify</button>
+    <input id="pat" type="password" placeholder="GitHub token (stored in this browser only)" style="flex:1;min-width:220px"><button class="sec" onclick="savePat()">Save token</button>
+  </div>
   <div class="row" style="margin-top:6px;align-items:center">
     <span style="font-size:13px;color:#6e6e73">Octopus free hour:</span>
     <input id="fsDate" type="date" style="font:inherit;padding:6px 8px;border-radius:10px;border:1px solid #d2d2d7">
@@ -258,13 +265,6 @@
     <span style="font-size:13px;color:#6e6e73">% first</span>
     <button onclick="setFree()">Set free session</button>
     <button class="sec" onclick="cmd('free_session','clear')">Clear</button>
-  </div>
-  <button class="sec" onclick="if(confirm('Restore the original Tesla app tariff and disable sync?'))cmd('tariff_restore','')">Restore original</button>
-    <button class="sec" onclick="cmd('dhw_ohme','off')">OFF</button>
-    <button class="sec" onclick="cmd('tado_auth','')">Connect tado</button>
-    <input id="eeroEmail" type="email" placeholder="eero account email" style="width:180px"><button class="sec" onclick="cmd('eero_login',val('eeroEmail'))">Connect eero</button>
-    <input id="eeroCode" placeholder="eero code" style="width:100px"><button class="sec" onclick="cmd('eero_verify',val('eeroCode'))">Verify</button>
-    <input id="pat" type="password" placeholder="GitHub token (stored in this browser only)" style="flex:1;min-width:220px"><button class="sec" onclick="savePat()">Save token</button>
   </div>
   <div class="err" id="cmderr"></div>
 </div>
