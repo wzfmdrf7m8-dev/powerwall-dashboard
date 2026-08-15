@@ -248,6 +248,17 @@
   <button onclick="cmd('tariff_sync','on')">Tariff sync: ON</button>
   <button class="sec" onclick="cmd('tariff_sync','off')">OFF</button>
   <button class="sec" onclick="cmd('tariff_push','')">Push tariff now</button>
+  <div class="row" style="margin-top:6px;align-items:center">
+    <span style="font-size:13px;color:#6e6e73">Octopus free hour:</span>
+    <input id="fsDate" type="date" style="font:inherit;padding:6px 8px;border-radius:10px;border:1px solid #d2d2d7">
+    <input id="fsStart" type="time" value="13:00" style="font:inherit;padding:6px 8px;border-radius:10px;border:1px solid #d2d2d7">
+    <input id="fsEnd" type="time" value="14:00" style="font:inherit;padding:6px 8px;border-radius:10px;border:1px solid #d2d2d7">
+    <span style="font-size:13px;color:#6e6e73">drain to</span>
+    <input id="fsTarget" type="number" min="0" max="90" step="5" value="35" style="width:70px;font:inherit;padding:6px 8px;border-radius:10px;border:1px solid #d2d2d7">
+    <span style="font-size:13px;color:#6e6e73">% first</span>
+    <button onclick="setFree()">Set free session</button>
+    <button class="sec" onclick="cmd('free_session','clear')">Clear</button>
+  </div>
   <button class="sec" onclick="if(confirm('Restore the original Tesla app tariff and disable sync?'))cmd('tariff_restore','')">Restore original</button>
     <button class="sec" onclick="cmd('dhw_ohme','off')">OFF</button>
     <button class="sec" onclick="cmd('tado_auth','')">Connect tado</button>
@@ -1190,6 +1201,14 @@ function render(d){
   if(a.enabled&&a.cheap_window&&a.cheap_window.enabled) html+='<span class="pill">cheap window '+a.cheap_window.start+'–'+a.cheap_window.end+'</span>';
   html+='<span class="pill">Powerwall follows Ohme slots: '+(a.follow_ohme_slots?'on':'off')+'</span>';
   html+='<span class="pill">Hot water 60° in Ohme slots: '+(a.dhw_ohme_slots?'on':'off')+'</span>';
+  const fs=d.free_session;
+  if(fs){
+    const phTxt={waiting:'armed',prep:'making headroom',live:'FREE HOUR — filling from grid',done:'finished'}[fs.phase]||fs.phase;
+    const liveNow=fs.phase==='live';
+    html+='<span class="pill"'+(liveNow?' style="background:#34c759;color:#fff;border-color:#34c759"':'')+'>Free session '+fs.date+' '+fs.start+'–'+fs.end+': '+phTxt+'</span>';
+    const lg=(fs.log||[])[(fs.log||[]).length-1];
+    if(lg&&fs.phase==='done') html+='<span class="pill">caught '+Math.max(0,lg.to-lg.from).toFixed(0)+'% of the pack</span>';
+  }
   // read-only: what an Ohme slot would do right now, and why. Mirrors the
   // worker's auto logic (worker.js applyAutomation) - same window, same rule.
   html += '<div class="sub" style="margin-top:6px">Ohme slots: ' + (function () {
@@ -1262,6 +1281,11 @@ document.addEventListener('visibilitychange',()=>{
   }
 });
 el('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
+function setFree(){
+  const v={date:val('fsDate'),start:val('fsStart'),end:val('fsEnd'),target:+val('fsTarget')||35};
+  if(!v.date||!v.start||!v.end){el('cmderr').textContent='Pick a date and a start and end time';return}
+  cmd('free_session',JSON.stringify(v));
+}
 function savePat(){localStorage.setItem('pw_pat',val('pat'));el('cmderr').innerHTML='<span class="ok">Token saved in this browser.</span>'}
 async function cmd(command,value){
   el('cmderr').textContent='Sending…';
