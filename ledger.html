@@ -144,6 +144,15 @@ function renderTariff(d){
   // a dispatch signal - this is the rate the export really settles at.
   const pOn=(tp.plan&&tp.plan.on)?tp.plan.on:[];
   const pReal=pOn.map(h=>(tp.real&&tp.real[h]!=null)?tp.real[h]:null).filter(x=>x!=null);
+  // The plan is no longer a single flat number - each slot is scaled across a
+  // band by how much Octopus really pays. Read the band back off the rates we
+  // actually pushed, so this label can never drift from the tariff again.
+  const planSell = pOn.map((h) => (tp.sell || [])[h]).filter((x) => x != null);
+  const bandLo = planSell.length ? Math.min.apply(null, planSell) : null;
+  const bandHi = planSell.length ? Math.max.apply(null, planSell) : null;
+  const planBand = (bandLo == null || Math.abs(bandHi - bandLo) < 0.05)
+    ? (tp.plan ? tp.plan.p + 'p' : '')
+    : (+bandLo.toFixed(1)) + '\u2013' + (+bandHi.toFixed(1)) + 'p';
   const pAvg=pReal.length?pReal.reduce((a,b)=>a+b,0)/pReal.length:null;
   // age of the push, in London time so it stays right when away from home. A stale
   // push used to render identically to a fresh one — that is how a broken tariff sat
@@ -158,7 +167,7 @@ function renderTariff(d){
     +' · buy: '+tp.offP.toFixed(1)+'p cheap / '+tp.onP.toFixed(1)+'p peak'
     +(syncOff?' · <span class="warn">sync disabled</span>':'')
     +(tp.missing?' · <span class="warn">'+tp.missing+' slot'+(tp.missing===1?'':'s')+' estimated</span>':'')
-    +(tp.plan?' · <span class="plantag">'+tp.plan.p+'p export plan '+slotLbl(tp.plan.from)+'–'+slotLbl(tp.plan.to+1)
+    +(tp.plan?' · <span class="plantag">'+planBand+' export plan '+slotLbl(tp.plan.from)+'–'+slotLbl(tp.plan.to+1)
         +(tp.plan.minP?' where ≥'+tp.plan.minP+'p':'')
         +(tp.plan.on?' · '+(tp.plan.on.length - (tp.plan.extra || []).length)+'/'+(tp.plan.to-tp.plan.from+1)+' slots':'')+'</span>':'')
     +(pAvg!=null?' · <span class="payavg">Octopus will pay ~'+pAvg.toFixed(2)+'p avg across those slots' + ((tp.plan.extra && tp.plan.extra.length) ? ' · +' + tp.plan.extra.length + ' earned by ohme (' + tp.plan.extra.map(slotLbl).join(', ') + ')' : '') + '</span>':'');
