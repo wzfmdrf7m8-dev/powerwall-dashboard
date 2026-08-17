@@ -794,11 +794,21 @@ async function pushTariff(env, state, sid, log) {
       }
     }
 
-    // the core window: flat plan price, except where Agile is below the floor
+    // The core window. A single flat price makes every half hour look identical
+    // to the Powerwall, so it has no reason to save the battery for the slots
+    // Octopus actually pays most for. Nudge the fabricated price up in half
+    // penny steps for the best paying few - just enough to break the tie.
     let skipped = 0;
+    const core = [];
     for (let h = planFrom; h <= oTo; h++) {
       if (realAt(h) < minP) { skipped++; continue; }
-      sellRates[key(h)] = Math.round(ocfg.pence * 10) / 1000;
+      core.push(h);
+    }
+    const byPay = core.slice().sort((a, b) => realAt(b) - realAt(a));
+    const bump = new Map();
+    byPay.forEach((h, i) => { if (i < 4) bump.set(h, (4 - i) * 0.5); });
+    for (const h of core) {
+      sellRates[key(h)] = Math.round((ocfg.pence + (bump.get(h) || 0)) * 10) / 1000;
       planOn.push(h);
     }
 
