@@ -7,7 +7,7 @@ const TESLA_TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/tok
 // Bump when the plan pricing logic changes. This is part of the tariff push
 // signature, so a code change reaches the Powerwall on the next cycle rather
 // than waiting for the date to roll over - the config alone cannot see it.
-const PLAN_ALGO = "flex-halfp-1";
+const PLAN_ALGO = "flex-linear-1";
 // Ohme's Firebase web key lives in env.OHME_GOOGLE_KEY, not here. It is a public
 // client identifier rather than a real secret, but keeping key-shaped strings out
 // of the repo stops secret scanning alerts drowning out a genuine one later.
@@ -800,19 +800,25 @@ async function pushTariff(env, state, sid, log) {
 
     // The core window. A single flat price makes every half hour look identical
     // to the Powerwall, so it has no reason to save the battery for the slots
-    // Octopus actually pays most for. Nudge the fabricated price up in half
-    // penny steps for the best paying few - just enough to break the tie.
+    // Octopus actually pays most for. Instead scale every slot across a narrow
+    // band above the plan price, in proportion to what Octopus actually pays,
+    // so the order the Powerwall sees matches the order that earns money.
     let skipped = 0;
     const core = [];
     for (let h = planFrom; h <= oTo; h++) {
       if (realAt(h) < minP) { skipped++; continue; }
       core.push(h);
     }
-    const byPay = core.slice().sort((a, b) => realAt(b) - realAt(a));
-    const bump = new Map();
-    byPay.forEach((h, i) => { if (i < 4) bump.set(h, (4 - i) * 0.5); });
+    const flex = ocfg.flex == null ? 2 : ocfg.flex;   // pence of spread
+    const pays = core.map(realAt);
+    const lo = Math.min.apply(null, pays);
+    const hi = Math.max.apply(null, pays);
+    const span = hi - lo;
     for (const h of core) {
-      sellRates[key(h)] = Math.round((ocfg.pence + (bump.get(h) || 0)) * 10) / 1000;
+      // Flat when every slot pays the same, otherwise the worst paying slot
+      // sits at the plan price and the best at plan + flex.
+      const p = span > 0 ? ocfg.pence + flex * (realAt(h) - lo) / span : ocfg.pence;
+      sellRates[key(h)] = Math.round(p * 10) / 1000;
       planOn.push(h);
     }
 
