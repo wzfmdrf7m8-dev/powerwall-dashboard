@@ -4,6 +4,10 @@
 const STANDING_FALLBACK = 66.38; // pence/day — from the Jun/Jul 2026 statement (66.38p/day)
 const TESLA_API = "https://fleet-api.prd.eu.vn.cloud.tesla.com";
 const TESLA_TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
+// Bump when the plan pricing logic changes. This is part of the tariff push
+// signature, so a code change reaches the Powerwall on the next cycle rather
+// than waiting for the date to roll over - the config alone cannot see it.
+const PLAN_ALGO = "flex-halfp-1";
 // Ohme's Firebase web key lives in env.OHME_GOOGLE_KEY, not here. It is a public
 // client identifier rather than a real secret, but keeping key-shaped strings out
 // of the repo stops secret scanning alerts drowning out a genuine one later.
@@ -1293,7 +1297,7 @@ async function pollCycle(env, state, opts = {}) {
       if (ts.enabled) {
         // config is part of the signature so changing the export plan or the
         // buy rates forces a push on the next cycle instead of waiting for midnight
-        const sig = localMinuteISO().slice(0, 10)
+        const sig = PLAN_ALGO + localMinuteISO().slice(0, 10)
           + JSON.stringify(tariffIntervals(state).off)
           + JSON.stringify(ts)
           + JSON.stringify((((state.ohmeData || {}).slots) || []).map((s) => s.start + '/' + s.end))
