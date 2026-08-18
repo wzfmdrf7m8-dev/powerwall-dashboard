@@ -65,6 +65,7 @@
   .bench .none{font-size:13px;color:var(--dim)}
   .bench table{margin-top:10px}
   .up{color:var(--mint);font-weight:600} .down{color:var(--pink);font-weight:600}
+  .prov{font-size:12px;color:var(--dim);margin-top:10px}
 </style>
 </head>
 <body>
@@ -97,7 +98,7 @@
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
     <h3 style="margin:0">RUNNING</h3>
     <div class="pills" style="margin:0" id="runType">
-      <button data-t="all" class="on">All runs</button><button data-t="out">Outdoor</button><button data-t="in">Indoor</button><button data-t="un">Unlabelled</button>
+      <button data-t="all" class="on">All runs</button><button data-t="out">Outdoor</button><button data-t="in">Indoor / treadmill</button>
     </div>
     <div class="pills" style="margin:0 0 0 auto" id="runRange">
       <button data-r="180">6m</button><button data-r="365" class="on">1y</button><button data-r="730">2y</button><button data-r="0">All</button>
@@ -330,10 +331,12 @@ function buildPicker(){
 const RUN_RE=/run|jog|treadmill/i;
 const isIndoor=n=>/indoor|treadmill/i.test(n);
 const isOutdoor=n=>/outdoor/i.test(n);
-/* Oura and some other sources log a treadmill session as a bare "Run" with no
-   indoor/outdoor marker. Calling that outdoor would be a guess, so it gets its
-   own bucket and its own colour rather than quietly padding the outdoor set. */
-const runKind=n=>isIndoor(n)?'in':isOutdoor(n)?'out':'un';
+/* The Apple Watch always qualifies the type — "Outdoor Run" or "Indoor Run" —
+   so a bare "Run" did not come from the watch. In this data those entries pair
+   with watch-logged Indoor Runs at matching durations while carrying no usable
+   distance, which is exactly what a ring records on a treadmill. They are
+   therefore treated as indoor, not left ambiguous. */
+const runKind=n=>isOutdoor(n)?'out':'in';
 const fmtPace=p=>{if(p==null||!isFinite(p))return'–';const m=Math.floor(p),sec=Math.round((p-m)*60);
   return sec===60?`${m+1}:00`:`${m}:${String(sec).padStart(2,'0')}`};
 const dnum=d=>new Date(d+'T12:00:00Z').getTime();
@@ -378,7 +381,7 @@ function drawRunning(){
   if(all.length<3){el('runCard').hidden=true;return}
   el('runCard').hidden=false;
   const R=runsFiltered();
-  const label={in:'indoor runs',out:'outdoor runs',un:'unlabelled runs'}[RUNTYPE]||'runs';
+  const label={in:'indoor runs',out:'outdoor runs'}[RUNTYPE]||'runs';
   if(!R.length){el('runNote').textContent=`No ${label} in this window.`;
     [CP,CO,CE,CVOL,CF].forEach(c=>c&&c.destroy());CP=CO=CE=CVOL=CF=null;
     el('runTiles').innerHTML='';el('runTable').innerHTML='';return}
@@ -533,9 +536,6 @@ function drawPace(R){
     {type:'scatter',label:'indoor',data:R.filter(r=>r.kind==='in').map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
       backgroundColor:'rgba(0,122,255,.5)',borderColor:'rgba(0,122,255,.9)',
       pointRadius:ptR(),pointHoverRadius:12},
-    {type:'scatter',label:'unlabelled',data:R.filter(r=>r.kind==='un').map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
-      backgroundColor:'rgba(175,82,222,.45)',borderColor:'rgba(175,82,222,.85)',
-      pointRadius:ptR(),pointHoverRadius:12},
     {type:'line',label:'5-run median',data:R.map((r,i)=>({x:r.t,y:med[i]})),
       borderColor:'#1d1d1f',borderWidth:2,pointRadius:0,tension:.3},
   ]},options:{animation:false,maintainAspectRatio:false,
@@ -600,13 +600,12 @@ function drawEff(R){
 
 function drawVolume(R){
   const by={};
-  for(const r of R){const k=r.day.slice(0,7);(by[k]=by[k]||{out:0,in:0,un:0})[r.kind]+=r.km}
+  for(const r of R){const k=r.day.slice(0,7);(by[k]=by[k]||{out:0,in:0})[r.kind]+=r.km}
   const months=Object.keys(by).sort();
   if(CVOL)CVOL.destroy();
   CVOL=new Chart(el('volChart'),{type:'bar',data:{labels:months,datasets:[
     {label:'outdoor',data:months.map(m=>+by[m].out.toFixed(1)),backgroundColor:'rgba(255,59,48,.75)',stack:'s',borderRadius:3},
     {label:'indoor',data:months.map(m=>+by[m].in.toFixed(1)),backgroundColor:'rgba(0,122,255,.7)',stack:'s',borderRadius:3},
-    {label:'unlabelled',data:months.map(m=>+by[m].un.toFixed(1)),backgroundColor:'rgba(175,82,222,.6)',stack:'s',borderRadius:3},
   ]},options:{animation:false,plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
     tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw} km`}}},
     scales:{y:{stacked:true,beginAtZero:true,grid:{color:'rgba(0,0,0,.06)'},
@@ -745,7 +744,8 @@ function drawWorkouts(){
     s.slice(0,10).map(w=>`<tr><td>${w.name.replace(/([a-z])([A-Z])/g,'$1 $2')}</td><td>${w.count}</td>`+
       `<td>${Math.round(w.min/60)} h</td><td>${w.km?w.km+' km':'–'}</td><td>${fmtNum(w.kcal,0)} kcal</td></tr>`).join('');
   const r=(D.workouts||[]).slice(0,5);
-  el('woRecent').textContent=r.length?('Most recent: '+r.map(w=>w.name.replace(/([a-z])([A-Z])/g,'$1 $2')+' '+w.day+(w.min?(' ('+Math.round(w.min)+' min)'):'')).join(' · ')):'';
+  el('woRecent').innerHTML=(r.length?('Most recent: '+r.map(w=>w.name.replace(/([a-z])([A-Z])/g,'$1 $2')+' '+w.day+(w.min?(' ('+Math.round(w.min)+' min)'):'')).join(' · ')):'')+
+    (D.workoutDupes?`<div class="prov"><b>${D.workoutDupes}</b> duplicate session${D.workoutDupes===1?'':'s'} merged — the same activity logged by two devices at once. The record with real distance was kept; totals above count each session once.</div>`:'');
 }
 
 function drawInsights(){
