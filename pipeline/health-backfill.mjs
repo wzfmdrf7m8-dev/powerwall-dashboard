@@ -229,5 +229,6 @@ function toBatch(slice) {
     activeEnergyBurned: w.kcal == null ? undefined : { qty: w.kcal, units: "kcal" },
     distance: w.km == null ? undefined : { qty: w.km, units: "km" },
   }));
-  return { data: { metrics: [...byMetric.values()], workouts } };
+  // Flag it: the worker must not add these day totals to hourly live values.
+  return { data: { meta: { backfill: true }, metrics: [...byMetric.values()], workouts } };
 }
