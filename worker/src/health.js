@@ -423,6 +423,14 @@ function pearson(a, b, lag) {
 /* ---------------- state migrations ---------------- */
 export const SCHEMA_VERSION = 1;
 
+/**
+ * Bump whenever the SHAPE of the built bundle changes — new caps, new fields,
+ * corrected units. The fold rebuilds when the stored bundle was built by an
+ * older version, so a deploy takes effect on the next cron tick instead of
+ * waiting for the phone to happen to sync.
+ */
+export const BUNDLE_VERSION = 2;
+
 /** Multiply every magnitude in a cell, leaving the sample count alone. */
 function scaleCell(c, f) {
   for (const k of ["s", "lo", "hi", "last", "d"]) if (typeof c[k] === "number") c[k] *= f;
@@ -516,11 +524,15 @@ export async function hkFold(env, encryptBundle, cryptoState) {
   const cursor = cursorObj ? (JSON.parse(await cursorObj.text()).key || "") : "";
 
   const listing = await env.PW.list({ prefix: "hk/raw/", startAfter: cursor || undefined, limit: 120 });
-  if (!listing.objects.length) return { folded: 0 };
 
   const stObj = await env.PW.get("hk/state.json");
   const state = stObj ? JSON.parse(await stObj.text()) : hkEmptyState();
   state.days = state.days || {}; state.workouts = state.workouts || {};
+
+  // Nothing new to fold AND the stored bundle already matches this code — the
+  // common case, and it must stay cheap because this runs every minute.
+  const stale = (state.bv || 0) !== BUNDLE_VERSION || (state.v || 0) < SCHEMA_VERSION;
+  if (!listing.objects.length && !stale) return { folded: 0 };
 
   state.seen = state.seen || [];
   let last = cursor;
@@ -555,11 +567,13 @@ export async function hkFold(env, encryptBundle, cryptoState) {
   compact(state);
   const now = new Date().toISOString();
   const bundle = hkBuildBundle(state, now);
+  state.bv = BUNDLE_VERSION;
   await env.PW.put("hk/state.json", JSON.stringify(state));
   await env.PW.put("hk/cursor.json", JSON.stringify({ key: last, at: now }));
   await env.PW.put("hk.enc", await encryptBundle(cryptoState, bundle));
 
-  return { folded: listing.objects.length, days: (bundle.range && bundle.range.days) || 0, more: listing.truncated };
+  return { folded: listing.objects.length, rebuilt: stale,
+    days: (bundle.range && bundle.range.days) || 0, more: listing.truncated };
 }
 
 /** Full rebuild from every raw batch — used after a historical backfill. */
@@ -570,7 +584,7 @@ export async function hkRebuild(env, encryptBundle, cryptoState) {
   for (;;) {
     const r = await hkFold(env, encryptBundle, cryptoState);
     total += r.folded || 0;
-    if (!r.folded || ++guard > 400) break;
+    if (!r.folded || ++guard > 400) break;   // a version-only rebuild folds 0 and stops here
   }
   return { rebuilt: true, batches: total };
 }
