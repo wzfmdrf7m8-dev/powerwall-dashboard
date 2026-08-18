@@ -58,7 +58,12 @@
   .hint{font-size:12px;color:var(--dim);margin-top:8px}
   h4.sec{font-size:12px;font-weight:700;color:var(--dim);letter-spacing:.04em;margin:22px 0 2px}
   .card .sech{font-size:12px;color:var(--dim);margin-bottom:10px;max-width:70ch}
-  #runCard canvas{max-height:300px}
+  /* Chart.js with maintainAspectRatio:false sizes the canvas to its parent.
+     Without a fixed-height parent the canvas grows, which grows the parent,
+     which grows the canvas — sleepChart reached 25,714px this way. A relative
+     box with an explicit height ends the feedback loop. */
+  .chartbox{position:relative;width:100%}
+  .chartbox canvas{position:absolute;inset:0;width:100%!important;height:100%!important}
   .bench{margin-bottom:20px}
   .bench .hdr{font-size:13.5px;margin-bottom:8px}
   .bench .hdr b{font-weight:700}
@@ -115,24 +120,24 @@
 
   <h4 class="sec">PACE PER RUN</h4>
   <div class="m sech">Every run plotted individually. Higher is faster; dot size is distance. The line is a 5-run rolling median, which is the honest read of a trend — single runs swing on weather, hills and how you slept.</div>
-  <canvas id="paceChart" height="150"></canvas>
+  <div class="chartbox" style="height:300px"><canvas id="paceChart"></canvas></div>
 
   <h4 class="sec">VO₂ MAX vs PACE</h4>
   <div class="m sech">Apple's VO₂ max estimate against your rolling pace. They should move together; if pace improves while VO₂ max is flat, the gain is likely pacing or conditions rather than aerobic fitness.</div>
-  <canvas id="vo2Chart" height="150"></canvas>
+  <div class="chartbox" style="height:300px"><canvas id="vo2Chart"></canvas></div>
 
   <h4 class="sec">AEROBIC EFFICIENCY</h4>
   <div class="m sech">Pace against average heart rate, coloured by recency. Points drifting up-and-left over time mean you are running faster at the same effort — the clearest single sign of aerobic improvement.</div>
-  <canvas id="effChart" height="150"></canvas>
+  <div class="chartbox" style="height:300px"><canvas id="effChart"></canvas></div>
 
   <h4 class="sec">MONTHLY VOLUME</h4>
-  <canvas id="volChart" height="120"></canvas>
+  <div class="chartbox" style="height:240px"><canvas id="volChart"></canvas></div>
 
   <h4 class="sec">RUNNING FORM</h4>
   <div class="m sech" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <select id="formPick"></select><span id="formNote"></span>
   </div>
-  <canvas id="formChart" height="130"></canvas>
+  <div class="chartbox" style="height:260px"><canvas id="formChart"></canvas></div>
 
   <h4 class="sec">RECENT RUNS</h4>
   <table id="runTable"></table>
@@ -147,13 +152,13 @@
     </div>
   </div>
   <div class="m" id="trendNote" style="color:var(--dim);font-size:12px;margin-bottom:8px"></div>
-  <canvas id="trendChart" height="150"></canvas>
+  <div class="chartbox" style="height:300px"><canvas id="trendChart"></canvas></div>
 </div>
 
 <div class="card" style="margin-bottom:18px" id="sleepCard" hidden>
   <h3 style="margin-bottom:4px">SLEEP STAGES</h3>
   <div class="m" id="sleepNote" style="color:var(--dim);font-size:12px;margin-bottom:8px"></div>
-  <canvas id="sleepChart" height="150"></canvas>
+  <div class="chartbox" style="height:300px"><canvas id="sleepChart"></canvas></div>
   <div class="m" style="margin-top:10px;font-size:12px">
     <b style="color:#0a3d91">deep</b> · <b style="color:#007aff">REM</b> · <b style="color:#8ec2ff">core</b> · <span style="color:#b9b9c0">awake</span>
   </div>
@@ -162,12 +167,12 @@
 <div class="card" style="margin-bottom:18px" id="vsCard" hidden>
   <h3 style="margin-bottom:4px">APPLE WATCH vs OURA — TIME ASLEEP</h3>
   <div class="m" id="vsNote" style="color:var(--dim);font-size:12px;margin-bottom:8px"></div>
-  <canvas id="vsChart" height="140"></canvas>
+  <div class="chartbox" style="height:280px"><canvas id="vsChart"></canvas></div>
 </div>
 
 <div class="card" style="margin-bottom:18px" id="weekCard" hidden>
   <h3 style="margin-bottom:8px">STEPS BY DAY OF WEEK</h3>
-  <canvas id="weekChart" height="120"></canvas>
+  <div class="chartbox" style="height:240px"><canvas id="weekChart"></canvas></div>
 </div>
 
 <div class="card" style="margin-bottom:18px" id="woCard" hidden>
@@ -191,6 +196,10 @@
 <script>
 const WORKER='https://powerwall-api.randlefamily.com';
 const el=id=>document.getElementById(id);
+/* The canvas now fills a fixed-height box, so hiding the canvas alone would
+   leave an empty gap where the chart was. Toggle the box. */
+const showChart=(id,on)=>{const c=el(id);if(!c)return;
+  const box=c.closest('.chartbox')||c; box.style.display=on?'':'none'};
 let PASS=null,D=null,HOME=null,CT=null,CS=null,CV=null,CW=null,RANGE=90,PICK=null;
 let RUNTYPE='all',RUNRANGE=365,FORMPICK=null,CP=null,CO=null,CE=null,CVOL=null,CF=null;
 
@@ -497,7 +506,7 @@ function drawBench(){
     }
     blocks.push(`<div class="bench"><div class="hdr"><b>${b.label}</b> — ${verdict}</div>`+
       `<div class="none">Baseline: median of ${baseNote}.</div>`+
-      `<canvas id="bench${b.key}" height="${Math.max(90,40+recent.length*26)}"></canvas>`+
+      `<div class="chartbox" style="height:${Math.max(110,50+recent.length*30)}px"><canvas id="bench${b.key}"></canvas></div>`+
       `<table id="benchT${b.key}"></table></div>`);
     anyChart.push({b,recent,basePace,baseHr});
   }
@@ -567,8 +576,8 @@ function drawVo2(R){
   const medAll=rollingMedian(R.map(r=>r.pace),5);
   const pb={min:Math.min(...medAll)-0.15,max:Math.max(...medAll)+0.15};
   const vo2=(D.series.vo2_max||[]).map(p=>({x:dnum(p[0]),y:p[1]}));
-  if(!vo2.length){el('vo2Chart').style.display='none';return}
-  el('vo2Chart').style.display='';
+  if(!vo2.length){showChart('vo2Chart',false);return}
+  showChart('vo2Chart',true);
   const from=R[0].t, to=R[R.length-1].t;
   const v=vo2.filter(p=>p.x>=from-30*864e5&&p.x<=to+864e5);
   const med=rollingMedian(R.map(r=>r.pace),5);
@@ -591,8 +600,8 @@ function drawVo2(R){
 
 function drawEff(R){
   const W=R.filter(r=>r.hrAvg!=null);
-  if(W.length<5){el('effChart').style.display='none';return}
-  el('effChart').style.display='';
+  if(W.length<5){showChart('effChart',false);return}
+  showChart('effChart',true);
   const t0=W[0].t,t1=W[W.length-1].t,span=(t1-t0)||1;
   const eb=paceBounds(W.map(r=>r.pace));
   if(CE)CE.destroy();
@@ -630,7 +639,7 @@ function buildFormPicker(){
   const sel=el('formPick');
   if(sel.options.length)return;
   const avail=FORM_METRICS.filter(m=>D.series[m]&&D.series[m].length>2);
-  if(!avail.length){sel.parentElement.style.display='none';el('formChart').style.display='none';return}
+  if(!avail.length){sel.parentElement.style.display='none';showChart('formChart',false);return}
   sel.innerHTML=avail.map(m=>`<option value="${m}">${D.metrics[m].l}${D.metrics[m].u?' ('+D.metrics[m].u+')':''}</option>`).join('');
   FORMPICK=avail[0];sel.value=FORMPICK;
   sel.onchange=e=>{FORMPICK=e.target.value;drawForm()};
