@@ -101,6 +101,10 @@ export function hkFlatten(payload) {
   const root = (payload && payload.data) || payload || {};
   const records = [], workouts = [];
   let skipped = 0;
+  // A historical backfill sends ONE pre-totalled value per metric per day. Live
+  // syncs send one per hour. Mixing the two by addition would double-count every
+  // overlapping day, so day-totals are tracked separately from hourly parts.
+  const dayAgg = !!(root.meta && root.meta.backfill);
 
   for (const metric of root.metrics || []) {
     const name = metric && metric.name, units = metric && metric.units;
@@ -117,7 +121,7 @@ export function hkFlatten(payload) {
           const target = SLEEP_FIELDS[k];
           if (!target || !Number.isFinite(Number(val))) continue;
           const hrs = Number(val);
-          records.push({ day, metric: target, qty: hrs, t: stamp(d.date) });
+          records.push({ day, metric: target, qty: hrs, t: stamp(d.date), dayAgg: dayAgg ? 1 : undefined });
           if (target === "sleep_in_bed") inBed = Math.max(inBed, hrs);
           if (target === "sleep_asleep") unspec = Math.max(unspec, hrs);
           if (target === "sleep_core" || target === "sleep_deep" || target === "sleep_rem") staged += hrs;
@@ -139,6 +143,7 @@ export function hkFlatten(payload) {
 
       if (primary != null) {
         const rec = { day, metric: name, qty: conv(name, primary, units), t: stamp(d.date) };
+        if (dayAgg) rec.dayAgg = 1;
         const lo = d.Min != null ? d.Min : d.min, hi = d.Max != null ? d.Max : d.max;
         if (Number.isFinite(Number(lo))) rec.min = conv(name, lo, units);
         if (Number.isFinite(Number(hi))) rec.max = conv(name, hi, units);
@@ -189,7 +194,8 @@ export function hkAccumulate(state, records) {
     if (meta(r.metric).agg === "sum") {
       // Keyed by stamp: a redelivered hour replaces its old value instead of
       // adding to it, so a retried or overlapping sync cannot inflate a total.
-      if (r.t) { c.p = c.p || {}; c.p[r.t] = r.qty; }
+      if (r.dayAgg) c.d = Math.max(c.d || 0, r.qty);
+      else if (r.t) { c.p = c.p || {}; c.p[r.t] = r.qty; }
       else c.s += r.qty;
       c.c += 1;
     } else {
@@ -214,7 +220,12 @@ export function hkResolveDay(cells) {
   const out = {};
   for (const [m, c] of Object.entries(cells)) {
     const M = meta(m);
-    const v = M.agg === "sum" ? (c.s + (c.p ? Object.values(c.p).reduce((a, b) => a + b, 0) : 0))
+    // max(), not sum(): the hourly parts and the backfilled day total are two
+    // measurements OF THE SAME DAY. Taking the larger means a day the live sync
+    // only caught half of still reports the backfill's full figure, and a fully
+    // live day ignores a staler backfill — without ever adding the two together.
+    const v = M.agg === "sum"
+      ? Math.max(c.s + (c.p ? Object.values(c.p).reduce((a, b) => a + b, 0) : 0), c.d || 0)
       : M.agg === "last" ? c.last : (c.c ? c.s / c.c : null);
     if (v == null || !Number.isFinite(v)) continue;
     out[m] = hkRound(v, M.p);
