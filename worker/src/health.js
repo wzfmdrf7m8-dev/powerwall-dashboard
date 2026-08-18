@@ -202,6 +202,10 @@ export function hkFlatten(payload, opts = {}) {
       km: q(w.distance, "walking_running_distance"),
       hrAvg: q(w.heartRate && w.heartRate.avg, "heart_rate"),
       hrMax: q(w.heartRate && w.heartRate.max, "heart_rate"),
+      // Which device logged it. Oura and the Watch name the same treadmill
+      // session differently, so the source is the only reliable way to tell
+      // them apart later. Only present on workouts ingested from here on.
+      src: w.source ? String(w.source).slice(0, 40) : null,
     });
   }
 
@@ -429,7 +433,7 @@ export const SCHEMA_VERSION = 1;
  * older version, so a deploy takes effect on the next cron tick instead of
  * waiting for the phone to happen to sync.
  */
-export const BUNDLE_VERSION = 2;
+export const BUNDLE_VERSION = 3;
 
 /** Multiply every magnitude in a cell, leaving the sample count alone. */
 function scaleCell(c, f) {
