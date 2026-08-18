@@ -58,6 +58,7 @@
   .hint{font-size:12px;color:var(--dim);margin-top:8px}
   h4.sec{font-size:12px;font-weight:700;color:var(--dim);letter-spacing:.04em;margin:22px 0 2px}
   .sech{font-size:12px;color:var(--dim);margin-bottom:10px;max-width:70ch}
+  #runCard canvas{max-height:300px}
 </style>
 </head>
 <body>
@@ -397,13 +398,15 @@ function drawRunning(){
   }
 }
 
-const xTime={type:'linear',ticks:{maxTicksLimit:8,color:'#6e6e73',
-  callback:v=>new Date(v).toLocaleDateString('en-GB',{month:'short',year:'2-digit'})},grid:{display:false}};
+/* Returns a FRESH object per chart: Chart.js mutates the options it is handed,
+   so sharing one scale config across charts corrupts whichever draws second. */
+const xTime=()=>({type:'linear',ticks:{maxTicksLimit:8,color:'#6e6e73',
+  callback:v=>new Date(v).toLocaleDateString('en-GB',{month:'short',year:'2-digit'})},grid:{display:false}});
 
 function drawPace(R){
   const med=rollingMedian(R.map(r=>r.pace),5);
   if(CP)CP.destroy();
-  CP=new Chart(el('paceChart'),{data:{datasets:[
+  CP=new Chart(el('paceChart'),{type:'scatter',data:{datasets:[
     {type:'scatter',label:'outdoor',data:R.filter(r=>!r.indoor).map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
       backgroundColor:'rgba(255,59,48,.55)',borderColor:'rgba(255,59,48,.9)',
       pointRadius:ptR,pointHoverRadius:12},
@@ -412,11 +415,11 @@ function drawPace(R){
       pointRadius:ptR,pointHoverRadius:12},
     {type:'line',label:'5-run median',data:R.map((r,i)=>({x:r.t,y:med[i]})),
       borderColor:'#1d1d1f',borderWidth:2,pointRadius:0,tension:.3},
-  ]},options:{animation:false,parsing:true,
+  ]},options:{animation:false,maintainAspectRatio:false,
     plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
       tooltip:{callbacks:{label:c=>c.raw.d?`${c.raw.n}: ${fmtPace(c.raw.y)}/km · ${c.raw.km.toFixed(2)} km`
         :`5-run median ${fmtPace(c.raw.y)}/km`}}},
-    scales:{x:xTime,
+    scales:{x:xTime(),
       // reversed: a lower number is a faster run, and "up = better" is what a
       // reader assumes without being told
       y:{reverse:true,grid:{color:'rgba(0,0,0,.06)'},
@@ -432,15 +435,15 @@ function drawVo2(R){
   const v=vo2.filter(p=>p.x>=from-30*864e5&&p.x<=to+864e5);
   const med=rollingMedian(R.map(r=>r.pace),5);
   if(CO)CO.destroy();
-  CO=new Chart(el('vo2Chart'),{data:{datasets:[
+  CO=new Chart(el('vo2Chart'),{type:'line',data:{datasets:[
     {type:'line',label:'VO₂ max',data:v,yAxisID:'y',borderColor:'#34c759',
       backgroundColor:'rgba(52,199,89,.12)',fill:true,pointRadius:0,borderWidth:2,tension:.3},
     {type:'line',label:'pace (5-run median)',data:R.map((r,i)=>({x:r.t,y:med[i]})),yAxisID:'y1',
       borderColor:'#ff3b30',borderWidth:2,pointRadius:0,tension:.3,borderDash:[4,3]},
-  ]},options:{animation:false,
+  ]},options:{animation:false,maintainAspectRatio:false,
     plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
       tooltip:{callbacks:{label:c=>c.dataset.yAxisID==='y1'?`pace ${fmtPace(c.raw.y)}/km`:`VO₂ max ${c.raw.y}`}}},
-    scales:{x:xTime,
+    scales:{x:xTime(),
       y:{position:'left',grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,color:'#34c759'},
         title:{display:true,text:'VO₂ max',color:'#34c759',font:{size:11}}},
       y1:{position:'right',reverse:true,grid:{display:false},
@@ -459,7 +462,7 @@ function drawEff(R){
     // recency as opacity: the eye reads the darker cloud as "now"
     backgroundColor:c=>`rgba(175,82,222,${(0.18+0.72*((c.raw&&c.raw.a)??1)).toFixed(2)})`,
     pointRadius:c=>ptR(c,0.7,10),pointHoverRadius:12}]},
-    options:{animation:false,plugins:{legend:{display:false},
+    options:{animation:false,maintainAspectRatio:false,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>`${c.raw.d}: ${fmtPace(c.raw.y)}/km at ${c.raw.x.toFixed(0)} bpm · ${c.raw.km.toFixed(2)} km`}}},
       scales:{x:{title:{display:true,text:'average heart rate (bpm)',color:'#6e6e73',font:{size:11}},
         grid:{color:'rgba(0,0,0,.06)'},ticks:{color:'#6e6e73'}},
@@ -501,13 +504,13 @@ function drawForm(){
   const s=M.stats||{};
   el('formNote').textContent=`${pts.length} days · median ${s.med}${M.u?' '+M.u:''} · range ${s.min}–${s.max}`;
   if(CF)CF.destroy();
-  CF=new Chart(el('formChart'),{data:{datasets:[
+  CF=new Chart(el('formChart'),{type:'scatter',data:{datasets:[
     {type:'scatter',label:M.l,data:pts,backgroundColor:'rgba(0,122,255,.45)',pointRadius:3},
     {type:'line',label:'5-point median',data:pts.map((p,i)=>({x:p.x,y:rollingMedian(pts.map(q=>q.y),5)[i]})),
       borderColor:'#1d1d1f',borderWidth:2,pointRadius:0,tension:.3},
-  ]},options:{animation:false,plugins:{legend:{display:false},
+  ]},options:{animation:false,maintainAspectRatio:false,plugins:{legend:{display:false},
     tooltip:{callbacks:{label:c=>`${M.l}: ${c.raw.y}${M.u?' '+M.u:''}`}}},
-    scales:{x:xTime,y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,color:'#6e6e73'}}}}});
+    scales:{x:xTime(),y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,color:'#6e6e73'}}}}});
 }
 
 function drawRunTable(R){
@@ -531,7 +534,7 @@ function drawTrend(){
   const u=unitOf(M.u);
   el('trendNote').textContent=`${pts.length} days shown · median ${fmtNum(s.med,M.p)}${u?(' '+u):''} · range ${fmtNum(s.min,M.p)}–${fmtNum(s.max,M.p)}`;
   if(CT)CT.destroy();
-  CT=new Chart(el('trendChart'),{data:{labels:pts.map(p=>p[0].slice(5)),datasets:[
+  CT=new Chart(el('trendChart'),{type:'bar',data:{labels:pts.map(p=>p[0].slice(5)),datasets:[
     {type:M.agg==='sum'?'bar':'line',label:M.l,data:pts.map(p=>p[1]),
       backgroundColor:M.agg==='sum'?colour+'cc':colour,borderColor:colour,borderRadius:3,
       pointRadius:0,borderWidth:M.agg==='sum'?0:1.6,tension:.25,order:2},
@@ -562,7 +565,7 @@ function drawSleep(){
     {label:'REM',data:pick('sleep_rem'),backgroundColor:'#007aff',stack:'s'},
     {label:'core',data:pick('sleep_core'),backgroundColor:'#8ec2ff',stack:'s'},
     {label:'awake',data:pick('sleep_awake'),backgroundColor:'#dcdce2',stack:'s'},
-  ]},options:{animation:false,plugins:{legend:{display:false},
+  ]},options:{animation:false,maintainAspectRatio:false,plugins:{legend:{display:false},
     tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.raw==null?'–':c.raw.toFixed(2)+' h')}}},
     scales:{y:{stacked:true,grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,callback:v=>v+' h',color:'#6e6e73'}},
       x:{stacked:true,ticks:{maxTicksLimit:10,color:'#6e6e73'},grid:{display:false}}}}});
@@ -600,7 +603,7 @@ function drawWeek(){
   if(CW)CW.destroy();
   CW=new Chart(el('weekChart'),{type:'bar',data:{labels:w.map(x=>x.d),datasets:[
     {data:w.map(x=>x.v),backgroundColor:w.map(x=>(x.d==='Sat'||x.d==='Sun')?'rgba(0,122,255,.45)':'rgba(0,122,255,.85)'),borderRadius:4}]},
-    options:{animation:false,plugins:{legend:{display:false},
+    options:{animation:false,maintainAspectRatio:false,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>fmtNum(c.raw,0)+' steps average ('+w[c.dataIndex].n+' days)'}}},
       scales:{y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4,color:'#6e6e73'},beginAtZero:true},
         x:{grid:{display:false},ticks:{color:'#6e6e73'}}}}});
