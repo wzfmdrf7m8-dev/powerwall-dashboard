@@ -25,6 +25,17 @@ export const HK_METRICS = {
   walking_speed:                { g: "activity", agg: "avg", l: "Walking Speed",        u: "km/hr",  p: 2 },
   apple_walking_steadiness:     { g: "activity", agg: "avg", l: "Walking Steadiness",   u: "%",      p: 0 },
 
+  // Running. running_speed arrives from Health Auto Export in mi/hr; declaring
+  // km/hr here makes the unit table convert it. See MIGRATIONS for the history.
+  running_speed:                { g: "running", agg: "avg", l: "Running Speed",        u: "km/hr",  p: 2 },
+  running_power:                { g: "running", agg: "avg", l: "Running Power",        u: "W",      p: 0 },
+  running_stride_length:        { g: "running", agg: "avg", l: "Stride Length",        u: "m",      p: 2 },
+  running_ground_contact_time:  { g: "running", agg: "avg", l: "Ground Contact",       u: "ms",     p: 0, inv: 1 },
+  running_vertical_oscillation: { g: "running", agg: "avg", l: "Vertical Oscillation", u: "cm",     p: 2, inv: 1 },
+  six_minute_walking_test_distance: { g: "running", agg: "avg", l: "6-Minute Walk",    u: "m",      p: 0 },
+  stair_speed_up:               { g: "running", agg: "avg", l: "Stair Speed Up",       u: "",       p: 2 },
+  stair_speed_down:             { g: "running", agg: "avg", l: "Stair Speed Down",     u: "",       p: 2 },
+
   heart_rate:                   { g: "cardio", agg: "avg", l: "Heart Rate",             u: "bpm",    p: 0 },
   resting_heart_rate:           { g: "cardio", agg: "avg", l: "Resting HR",             u: "bpm",    p: 0, inv: 1 },
   walking_heart_rate_average:   { g: "cardio", agg: "avg", l: "Walking HR",             u: "bpm",    p: 0, inv: 1 },
@@ -60,7 +71,7 @@ export const HK_METRICS = {
   headphone_audio_exposure:     { g: "other", agg: "avg", l: "Headphone Audio",         u: "dB",     p: 0, inv: 1 },
 };
 
-export const HK_GROUPS = { activity: "Activity", cardio: "Cardio & Vitals", sleep: "Sleep", body: "Body", other: "Other" };
+export const HK_GROUPS = { activity: "Activity", running: "Running", cardio: "Cardio & Vitals", sleep: "Sleep", body: "Body", other: "Other" };
 const HEADLINE = ["step_count", "active_energy", "apple_exercise_time", "sleep_asleep",
   "resting_heart_rate", "heart_rate_variability", "weight_body_mass", "vo2_max"];
 
@@ -147,6 +158,9 @@ export function hkFlatten(payload, opts = {}) {
 
       if (primary != null) {
         const rec = { day, metric: name, qty: conv(name, primary, units), t: stamp(d.date) };
+        // An unregistered metric has no declared unit, so carry the source one
+        // through rather than rendering an unlabelled axis.
+        if (!HK_METRICS[name] && units) rec.u = String(units);
         if (dayAgg) rec.dayAgg = 1;
         const lo = d.Min != null ? d.Min : d.min, hi = d.Max != null ? d.Max : d.max;
         if (Number.isFinite(Number(lo))) rec.min = conv(name, lo, units);
@@ -171,11 +185,19 @@ export function hkFlatten(payload, opts = {}) {
   for (const w of root.workouts || []) {
     const day = localDay(w && w.start);
     if (!day) continue;
-    const q = (o, n) => (o && Number.isFinite(Number(o.qty))) ? hkRound(conv(n, o.qty, o.units), 2) : null;
+    // Health Auto Export is not consistent here: some workout fields arrive as
+    // {qty, units}, others as a bare number. Accept both rather than silently
+    // dropping the value — a null heart rate quietly removes a whole chart.
+    const q = (o, n) => {
+      if (o == null) return null;
+      if (Number.isFinite(Number(o))) return hkRound(conv(n, Number(o), null), 2);
+      if (Number.isFinite(Number(o.qty))) return hkRound(conv(n, Number(o.qty), o.units), 2);
+      return null;
+    };
     workouts.push({
       id: w.id || `${day}-${w.name}-${w.start}`,
       day, name: w.name || "Workout", start: w.start, end: w.end,
-      min: Number.isFinite(Number(w.duration)) ? hkRound(Number(w.duration) / 60, 1) : null,
+      min: durationMinutes(w.duration),
       kcal: q(w.activeEnergyBurned, "active_energy"),
       km: q(w.distance, "walking_running_distance"),
       hrAvg: q(w.heartRate && w.heartRate.avg, "heart_rate"),
@@ -187,11 +209,23 @@ export function hkFlatten(payload, opts = {}) {
 }
 
 /* ---------------- accumulate ---------------- */
-export const hkEmptyState = () => ({ days: {}, workouts: {}, n: 0, lastSync: null, lastAutomation: null });
+/** Workout duration: seconds by default, but honour an explicit unit. */
+function durationMinutes(d) {
+  if (d == null) return null;
+  if (Number.isFinite(Number(d))) return hkRound(Number(d) / 60, 1);
+  const v = Number(d.qty);
+  if (!Number.isFinite(v)) return null;
+  const u = String(d.units || "s");
+  return hkRound(/min/i.test(u) ? v : /hr|hour/i.test(u) ? v * 60 : v / 60, 1);
+}
+
+export const hkEmptyState = () => ({ days: {}, workouts: {}, units: {}, v: SCHEMA_VERSION, n: 0, lastSync: null, lastAutomation: null });
 
 export function hkAccumulate(state, records) {
+  state.units = state.units || {};
   for (const r of records) {
     if (!r || !r.day || !r.metric || !Number.isFinite(r.qty)) continue;
+    if (r.u && !state.units[r.metric]) state.units[r.metric] = r.u;
     const day = (state.days[r.day] = state.days[r.day] || {});
     const c = (day[r.metric] = day[r.metric] || { s: 0, c: 0, lo: null, hi: null, last: null });
     const n = Number.isFinite(r.n) && r.n > 0 ? r.n : 1;
@@ -243,9 +277,10 @@ export function hkResolveDay(cells) {
 
 /* ---------------- build the bundle the page renders ---------------- */
 const mean = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
-const MAX_DAYS = 730;
+const MAX_DAYS = 2200;   // ~6 years
 
 export function hkBuildBundle(state, nowISO) {
+  const srcUnits = state.units || {};
   const allDays = Object.keys(state.days || {}).sort();
   const days = allDays.slice(-MAX_DAYS);
   if (!days.length) {
@@ -272,7 +307,7 @@ export function hkBuildBundle(state, nowISO) {
       pts.push([d, v]);
     }
     series[m] = pts;
-    metrics[m] = { l: M.l, u: M.u, g: M.g, agg: M.agg, p: M.p, inv: M.inv ? 1 : 0, n: pts.length,
+    metrics[m] = { l: M.l, u: M.u || srcUnits[m] || "", g: M.g, agg: M.agg, p: M.p, inv: M.inv ? 1 : 0, n: pts.length,
       stats: describe(pts.map((x) => x[1])) };
   }
 
@@ -282,7 +317,7 @@ export function hkBuildBundle(state, nowISO) {
     if (!tiles.some((t) => t.m === m)) tiles.push(tile(m, series[m], metrics[m]));
   }
 
-  const workouts = Object.values(state.workouts || {}).sort((a, b) => a.start < b.start ? 1 : -1).slice(0, 300);
+  const workouts = Object.values(state.workouts || {}).sort((a, b) => a.start < b.start ? 1 : -1).slice(0, 1500);
 
   return {
     generated_at: nowISO,
@@ -385,6 +420,46 @@ function pearson(a, b, lag) {
   return den === 0 ? null : num / den;
 }
 
+/* ---------------- state migrations ---------------- */
+export const SCHEMA_VERSION = 1;
+
+/** Multiply every magnitude in a cell, leaving the sample count alone. */
+function scaleCell(c, f) {
+  for (const k of ["s", "lo", "hi", "last", "d"]) if (typeof c[k] === "number") c[k] *= f;
+  if (c.p) for (const k of Object.keys(c.p)) c.p[k] *= f;
+}
+
+const MIGRATIONS = [
+  {
+    v: 1,
+    note: "running_speed was stored in mi/hr before it entered the registry",
+    apply(state) {
+      let n = 0;
+      for (const cells of Object.values(state.days || {})) {
+        if (cells.running_speed) { scaleCell(cells.running_speed, 1.609344); n++; }
+      }
+      return n;
+    },
+  },
+];
+
+/**
+ * Applied once per state, before the bundle is built. Without this a unit fix
+ * shows up as a step change in the chart on the day it deployed — which reads
+ * as a dramatic change in the athlete, not in the code.
+ */
+export function hkMigrate(state) {
+  const from = state.v || 0;
+  const applied = [];
+  for (const m of MIGRATIONS) {
+    if (from >= m.v) continue;
+    const n = m.apply(state);
+    applied.push(`v${m.v}: ${m.note} (${n} days)`);
+  }
+  state.v = SCHEMA_VERSION;
+  return applied;
+}
+
 /* ---------------- request handling ---------------- */
 const MAX_BODY = 24 * 1024 * 1024;
 
@@ -475,6 +550,8 @@ export async function hkFold(env, encryptBundle, cryptoState) {
     last = o.key;
   }
 
+  const migrated = hkMigrate(state);
+  if (migrated.length) console.log("apple health migrations:", migrated.join("; "));
   compact(state);
   const now = new Date().toISOString();
   const bundle = hkBuildBundle(state, now);
