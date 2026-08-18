@@ -321,7 +321,8 @@ export function hkBuildBundle(state, nowISO) {
     if (!tiles.some((t) => t.m === m)) tiles.push(tile(m, series[m], metrics[m]));
   }
 
-  const workouts = Object.values(state.workouts || {}).sort((a, b) => a.start < b.start ? 1 : -1).slice(0, 1500);
+  const deduped = dedupeWorkouts(Object.values(state.workouts || {}));
+  const workouts = deduped.workouts.slice(0, 1500);
 
   return {
     generated_at: nowISO,
@@ -333,7 +334,8 @@ export function hkBuildBundle(state, nowISO) {
     headline: tiles,
     metrics, series,
     workouts,
-    workoutSummary: summariseWorkouts(Object.values(state.workouts || {})),
+    workoutSummary: summariseWorkouts(deduped.workouts),
+    workoutDupes: deduped.merged,
     weekday: weekdayProfile(series.step_count || []),
     insights: insights(series, metrics),
   };
@@ -367,6 +369,68 @@ function weekdayProfile(pts) {
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], b = names.map(() => []);
   for (const [d, v] of pts.slice(-365)) b[new Date(d + "T12:00:00Z").getUTCDay()].push(v);
   return [1, 2, 3, 4, 5, 6, 0].map((i) => ({ d: names[i], v: hkRound(mean(b[i]) || 0, 0), n: b[i].length }));
+}
+
+/**
+ * Two devices logging one session produce two workouts. The ring cannot measure
+ * treadmill distance, the watch can, so the pair looks like "4.7 km / 37 min"
+ * plus "0.01 km / 36 min" — double the sessions and double the minutes for one
+ * run. Overlapping records of the same activity class collapse to the richest.
+ */
+function wMs(v) {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : null;
+}
+function wClass(n) {
+  const s = String(n || "");
+  if (/run|jog|treadmill/i.test(s)) return "run";
+  if (/walk|hike/i.test(s)) return "walk";
+  if (/cycl|bike/i.test(s)) return "cycle";
+  if (/swim/i.test(s)) return "swim";
+  return "other";
+}
+/** Richer = has distance, then more distance, then longer. */
+function wBetter(a, b) {
+  const ak = a.km > 0 ? 1 : 0, bk = b.km > 0 ? 1 : 0;
+  if (ak !== bk) return ak > bk;
+  if (ak && Math.abs((a.km || 0) - (b.km || 0)) > 0.01) return (a.km || 0) > (b.km || 0);
+  return (a.min || 0) > (b.min || 0);
+}
+const OVERLAP_LOOKBACK_MS = 6 * 3600 * 1000;
+
+export function dedupeWorkouts(list) {
+  const timed = [], untimed = [];
+  for (const w of list) {
+    const s = wMs(w.start), e = wMs(w.end);
+    if (s && e && e > s) timed.push({ w, s, e, c: wClass(w.name) });
+    else untimed.push(w);
+  }
+  timed.sort((a, b) => a.s - b.s);
+
+  const kept = [];
+  let merged = 0;
+  for (const it of timed) {
+    let absorbed = false;
+    for (let i = kept.length - 1; i >= 0; i--) {
+      const k = kept[i];
+      if (it.s - k.s > OVERLAP_LOOKBACK_MS) break;   // sorted by start: nothing older can overlap
+      if (k.c !== it.c) continue;
+      const ov = Math.min(k.e, it.e) - Math.max(k.s, it.s);
+      const shorter = Math.min(k.e - k.s, it.e - it.s);
+      if (ov > 0 && shorter > 0 && ov / shorter > 0.5) {
+        const dup = (k.dup || 0) + 1;
+        if (wBetter(it.w, k.w)) kept[i] = { ...it, dup };
+        else k.dup = dup;
+        absorbed = true;
+        merged++;
+        break;
+      }
+    }
+    if (!absorbed) kept.push({ ...it });
+  }
+  const out = kept.map((k) => (k.dup ? { ...k.w, dup: k.dup } : k.w)).concat(untimed);
+  out.sort((a, b) => (a.start < b.start ? 1 : -1));
+  return { workouts: out, merged };
 }
 
 function summariseWorkouts(ws) {
@@ -433,7 +497,7 @@ export const SCHEMA_VERSION = 1;
  * older version, so a deploy takes effect on the next cron tick instead of
  * waiting for the phone to happen to sync.
  */
-export const BUNDLE_VERSION = 3;
+export const BUNDLE_VERSION = 4;
 
 /** Multiply every magnitude in a cell, leaving the sample count alone. */
 function scaleCell(c, f) {
