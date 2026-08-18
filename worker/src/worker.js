@@ -1,6 +1,8 @@
 // Powerwall poller — Cloudflare Worker port of apply.py
 // Cron: every minute. Storage: R2 (binding PW). Data served at /data, commands at /cmd.
 
+import { hkIngest, hkFold, hkRebuild, hkSafeEqual } from "./health.js";
+
 const STANDING_FALLBACK = 66.38; // pence/day — from the Jun/Jul 2026 statement (66.38p/day)
 const TESLA_API = "https://fleet-api.prd.eu.vn.cloud.tesla.com";
 const TESLA_TOKEN_URL = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token";
@@ -2187,6 +2189,12 @@ const CORS = {
 export default {
   async scheduled(event, env, ctx) {
     const state = await loadState(env);
+    // Apple Health: fold any batches the phone pushed since the last tick. Cheap
+    // no-op when nothing new arrived, so it is safe on the every-minute cron.
+    try {
+      const r = await hkFold(env, encryptBundle, state);
+      if (r.folded) console.log("apple health: folded", r.folded, "batch(es),", r.days, "days");
+    } catch (e) { console.error("apple health fold failed:", String(e).slice(0, 200)); }
     try { await pollCycle(env, state); }
     catch (e) {
       // log the failure but don't rethrow — avoids alert spam; /health shows lastError
@@ -2286,6 +2294,30 @@ export default {
         }
         return oj({ error: "Not found" }, 404);
       } catch (e) { return oj({ error: String(e.message || e) }, 502); }
+    }
+    // ---- Apple Health (HealthKit) ----------------------------------------
+    // /hk/ingest is called by the iPhone (Health Auto Export), authenticated with
+    // HK_TOKEN. /hk serves the encrypted bundle exactly like /home and /daybins.
+    if (url.pathname === "/hk/ingest") {
+      const res = await hkIngest(request, env);
+      for (const [k, v] of Object.entries(CORS)) res.headers.set(k, v);
+      return res;
+    }
+    if (url.pathname === "/hk/rebuild" && request.method === "POST") {
+      if (!hkSafeEqual(request.headers.get("x-api-key") || "", env.HK_TOKEN || ""))
+        return new Response("unauthorized", { status: 401, headers: CORS });
+      const state = await loadState(env);
+      return new Response(JSON.stringify(await hkRebuild(env, encryptBundle, state)),
+        { headers: { ...CORS, "Content-Type": "application/json" } });
+    }
+    if (url.pathname === "/hk") {
+      const obj = await env.PW.get("hk.enc");
+      if (!obj) return new Response("no data yet", { status: 404, headers: CORS });
+      return new Response(await obj.text(), {
+        headers: { ...CORS, "Content-Type": "text/plain", "Cache-Control": "no-store",
+          "x-updated": (obj.uploaded ? new Date(obj.uploaded).toISOString() : ""),
+          "Access-Control-Expose-Headers": "x-updated" },
+      });
     }
     if (url.pathname === "/health") {
       // gated: only returns detail to an authenticated caller
