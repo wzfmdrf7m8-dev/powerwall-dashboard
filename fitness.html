@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Health</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Health">
+<meta name="theme-color" content="#f5f5f7">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#f5f5f7;--card:#fff;--edge:rgba(0,0,0,.05);--txt:#1d1d1f;--dim:#6e6e73;
+    --mint:#34c759;--sun:#ff9500;--cyan:#007aff;--pink:#ff3b30;--violet:#af52de;--deep:#0a3d91}
+  *{box-sizing:border-box;margin:0}
+  html,body{overflow-x:hidden;max-width:100vw}
+  body{color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif;
+    padding:24px 20px;max-width:1150px;margin:auto;background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased}
+  @media(max-width:600px){body{padding:14px 10px}}
+  nav{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+  nav a{text-decoration:none;color:var(--txt);background:#fff;border:1px solid #e5e5ea;border-radius:99px;padding:6px 16px;font-size:13px;font-weight:600}
+  nav a.on{background:#1d1d1f;color:#fff;border-color:#1d1d1f}
+  h1{font-size:22px;font-weight:700;margin-bottom:2px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:16px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px;margin-bottom:18px}
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:18px;padding:16px 18px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  .card h3{font-size:13px;font-weight:600;color:var(--dim)}
+  .card .v{font-size:30px;font-weight:700;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card .v .u{font-size:14px;font-weight:600;color:var(--dim);margin-left:4px;letter-spacing:0}
+  .card .m{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ok{color:var(--mint)} .warn{color:var(--pink)} .mid{color:var(--sun)}
+  .err{color:var(--pink);font-size:13px;margin:10px 0}
+  .badge{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:5px 12px;font-size:12px;font-weight:600;margin-bottom:14px}
+  .badge.live{background:rgba(52,199,89,.12);color:#1a7f37}
+  .badge.stale{background:rgba(255,149,0,.14);color:#9a5b00}
+  .badge.dead{background:rgba(255,59,48,.12);color:#c1271d}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+  .spark{display:block;width:100%;height:26px;margin-top:8px}
+  .delta{font-size:12px;font-weight:600}
+  .pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .pills button{background:#fff;border:1px solid #e5e5ea;color:var(--txt);border-radius:99px;padding:5px 13px;font-size:12px;font-weight:600;cursor:pointer}
+  .pills button.on{background:#1d1d1f;color:#fff;border-color:#1d1d1f}
+  select{font:inherit;font-size:13px;border-radius:10px;border:1px solid #d2d2d7;padding:7px 10px;background:#fff;color:var(--txt);max-width:100%}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:6px 8px 6px 0;border-bottom:1px solid #f0f0f3}
+  td{padding:7px 8px 7px 0;border-bottom:1px solid #f6f6f8}
+  tr:last-child td{border-bottom:0}
+  .stack{height:12px;border-radius:6px;overflow:hidden;display:flex;margin:8px 0}
+  .stack i{display:block;height:12px}
+  .setup{background:#fff;border:1px solid var(--edge);border-radius:18px;padding:20px 22px;margin-bottom:18px}
+  .setup ol{margin:10px 0 0 18px;padding:0} .setup li{margin-bottom:9px}
+  code{background:#f0f0f3;border-radius:6px;padding:2px 7px;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+  #overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:10}
+  #overlay .box{background:#fff;border:1px solid var(--edge);padding:32px;border-radius:22px;width:320px;text-align:center}
+  input,button{font:inherit;border-radius:10px;border:1px solid #d2d2d7;padding:8px 12px}
+  #overlay button{background:#0071e3;color:#fff;border:0;font-weight:600;cursor:pointer;border-radius:980px;padding:8px 16px}
+  .hint{font-size:12px;color:var(--dim);margin-top:8px}
+</style>
+</head>
+<body>
+<nav>
+  <a href="./">⚡ Energy</a><a href="heating">🌡 Heating</a><a href="heatpump">♨️ Heat pump</a><a href="network">📶 Network</a><a href="octopus">🐙 Octopus</a><a href="oura">💍 Oura</a><a class="on" href="fitness">❤️ Health</a><a href="health">🔋 Battery</a><a href="ledger">📒 Ledger</a><a href="lights">💡 Lights</a><a href="ovens">🔥 Ovens</a>
+</nav>
+<h1>Health</h1>
+<div class="sub" id="sub">…</div>
+<div id="badge"></div>
+<div class="err" id="err"></div>
+
+<div class="setup" id="setup" hidden>
+  <h3 style="font-size:15px;font-weight:700;margin-bottom:4px" id="setupTitle">Waiting for the first sync from your iPhone</h3>
+  <div class="m" style="color:var(--dim);font-size:13px" id="setupNote">This page fills itself in automatically once the phone starts pushing. HealthKit has no server API — data can only leave the device from an app running on it.</div>
+  <ol>
+    <li>Install <b>Health Auto Export</b> from the App Store and grant it read access to your Health data.</li>
+    <li>Go to <b>Automations → Add Automation → REST API</b>.</li>
+    <li>Set the URL to <code>https://powerwall-api.randlefamily.com/hk/ingest</code></li>
+    <li>Add a header <code>x-api-key</code> with your <code>HK_TOKEN</code> value.</li>
+    <li>Format <b>JSON</b>, aggregation <b>Hourly</b>, date range <b>Since Last Sync</b>, frequency <b>every 1 hour</b>, and turn <b>Batch Requests</b> on.</li>
+    <li>Select the metrics you want — Activity, Heart, Sleep and Body are all understood, plus workouts.</li>
+  </ol>
+  <div class="hint">Historical data: run the backfill script against your Health app export to load everything from before today.</div>
+</div>
+
+<div class="grid" id="cards"></div>
+
+<div class="card" style="margin-bottom:18px" id="trendCard" hidden>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+    <h3 style="margin:0">TREND</h3>
+    <select id="metricPick"></select>
+    <div class="pills" style="margin:0 0 0 auto" id="rangePills">
+      <button data-r="30">30d</button><button data-r="90" class="on">90d</button><button data-r="365">1y</button><button data-r="0">All</button>
+    </div>
+  </div>
+  <div class="m" id="trendNote" style="color:var(--dim);font-size:12px;margin-bottom:8px"></div>
+  <canvas id="trendChart" height="150"></canvas>
+</div>
+
+<div class="card" style="margin-bottom:18px" id="sleepCard" hidden>
+  <h3 style="margin-bottom:4px">SLEEP STAGES</h3>
+  <div class="m" id="sleepNote" style="color:var(--dim);font-size:12px;margin-bottom:8px"></div>
+  <canvas id="sleepChart" height="150"></canvas>
+  <div class="m" style="margin-top:10px;font-size:12px">
+    <b style="color:#0a3d91">deep</b> · <b style="color:#007aff">REM</b> · <b style="color:#8ec2ff">core</b> · <span style="color:#b9b9c0">awake</span>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:18px" id="vsCard" hidden>
+  <h3 style="margin-bottom:4px">APPLE WATCH vs OURA — TIME ASLEEP</h3>
+  <div class="m" id="vsNote" style="color:var(--dim);font-size:12px;margin-bottom:8px"></div>
+  <canvas id="vsChart" height="140"></canvas>
+</div>
+
+<div class="card" style="margin-bottom:18px" id="weekCard" hidden>
+  <h3 style="margin-bottom:8px">STEPS BY DAY OF WEEK</h3>
+  <canvas id="weekChart" height="120"></canvas>
+</div>
+
+<div class="card" style="margin-bottom:18px" id="woCard" hidden>
+  <h3 style="margin-bottom:8px">WORKOUTS</h3>
+  <table id="woTable"></table>
+  <div class="m" style="margin-top:10px;color:var(--dim);font-size:12px" id="woRecent"></div>
+</div>
+
+<div class="card" style="margin-bottom:18px" id="insCard" hidden>
+  <h3 style="margin-bottom:8px">PATTERNS</h3>
+  <div id="insList"></div>
+</div>
+
+<div id="overlay" style="display:none"><div class="box">
+  <h1 style="font-size:18px;margin-bottom:12px">Unlock</h1>
+  <input id="pw" type="password" placeholder="Password" style="width:100%;margin-bottom:10px">
+  <button onclick="unlock()">Open</button>
+  <div class="err" id="pwerr"></div>
+</div></div>
+
+<script>
+const WORKER='https://powerwall-api.randlefamily.com';
+const el=id=>document.getElementById(id);
+let PASS=null,D=null,HOME=null,CT=null,CS=null,CV=null,CW=null,RANGE=90,PICK=null;
+
+async function deriveKey(pass,salt){
+  const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:200000,hash:'SHA-256'},km,{name:'AES-CBC',length:256},false,['decrypt']);
+}
+async function loadEnc(path,pass){
+  const res=await fetch(`${WORKER}${path}?_=${Date.now()}`,{cache:'no-store'});
+  if(!res.ok) throw new Error(res.status===404?'no data yet':('fetch failed ('+res.status+')'));
+  const raw=Uint8Array.from(atob((await res.text()).trim()),c=>c.charCodeAt(0));
+  const key=await deriveKey(pass,raw.slice(0,16));
+  const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+const fmtNum=(v,p)=>v==null?'–':Number(v).toLocaleString(undefined,{minimumFractionDigits:p||0,maximumFractionDigits:p||0});
+const ago=iso=>{
+  if(!iso) return null;
+  const mins=Math.max(0,(Date.now()-new Date(iso).getTime())/60000);
+  if(mins<90) return Math.round(mins)+' min ago';
+  if(mins<48*60) return Math.round(mins/60)+' hours ago';
+  return Math.round(mins/1440)+' days ago';
+};
+function card(h,v,m,cls,spark,delta){
+  return `<div class="card"><h3>${h}</h3><div class="v ${cls||''}">${v}</div>`+
+    `<div class="m">${m||''} ${delta||''}</div>`+(spark||'')+`</div>`;
+}
+// inline sparkline — cheaper than a Chart.js instance per tile
+function sparkSvg(vals,colour){
+  const v=(vals||[]).filter(x=>x!=null);
+  if(v.length<3) return '';
+  const lo=Math.min(...v),hi=Math.max(...v),span=(hi-lo)||1,W=160,H=26;
+  const pts=v.map((y,i)=>`${(i/(v.length-1)*W).toFixed(1)},${(H-2-(y-lo)/span*(H-4)).toFixed(1)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">`+
+    `<polyline points="${pts}" fill="none" stroke="${colour}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" opacity=".85"/></svg>`;
+}
+const GC={activity:'#007aff',cardio:'#ff3b30',sleep:'#0a3d91',body:'#af52de',other:'#6e6e73'};
+const SHORT_UNIT={'ml/kg/min':'ml/kg·min','br/min':'br/min','dBASPL':'dB'};
+// "count" is HealthKit's placeholder for "no unit" — never show it
+const unitOf=u=>(!u||u==='count')?'':(SHORT_UNIT[u]||u);
+
+/* ---- sync freshness: this pill is only meaningful if the phone is pushing ---- */
+function renderBadge(d){
+  const last=d&&d.lastSync;
+  if(!last){ el('badge').innerHTML='<div class="badge dead"><i class="dot"></i>No sync yet</div>'; return 'dead'; }
+  const hrs=(Date.now()-new Date(last).getTime())/36e5;
+  const state=hrs<6?'live':(hrs<48?'stale':'dead');
+  const label=state==='live'?('Syncing · last '+ago(last)):('Last synced '+ago(last));
+  el('badge').innerHTML=`<div class="badge ${state}"><i class="dot"></i>${label}${d.lastAutomation?(' · '+d.lastAutomation):''}</div>`;
+  return state;
+}
+
+function render(){
+  const d=D;
+  el('err').textContent='';
+  const state=renderBadge(d);
+
+  if(!d||d.empty){
+    el('setup').hidden=false;
+    el('sub').textContent='Apple Health · nothing received yet';
+    ['trendCard','sleepCard','vsCard','weekCard','woCard','insCard'].forEach(i=>el(i).hidden=true);
+    el('cards').innerHTML='';
+    return;
+  }
+  // The panel doubles as a fault guide: first run and "sync has stopped" need
+  // different words, but the same six steps fix both.
+  el('setup').hidden=(state!=='dead');
+  if(state==='dead'){
+    el('setupTitle').textContent='Sync has stopped — the figures below are the last received';
+    el('setupNote').textContent='Nothing has arrived from your iPhone in over 48 hours. Check the Health Auto Export automation is still enabled and that the phone has run it recently.';
+  }
+
+  el('sub').textContent=[
+    d.range.total+' days of history',
+    d.range.from+' → '+d.range.to,
+    Object.keys(d.metrics).length+' metrics',
+    'rebuilt '+(d.generated_at||'').slice(11,16),
+  ].filter(Boolean).join(' · ');
+
+  // headline tiles
+  el('cards').innerHTML=(d.headline||[]).map(t=>{
+    const dl=t.dp==null?'':`<span class="delta ${t.good>0?'ok':(t.good<0?'warn':'')}">${t.dp>0?'▲':(t.dp<0?'▼':'')} ${Math.abs(t.dp)}%</span>`;
+    // "count" is not a unit anyone wants to read; long units go small so the
+    // number itself stays the thing you see.
+    const unit=(!t.u||t.u==='count')?'':`<span class="u">${SHORT_UNIT[t.u]||t.u}</span>`;
+    return card(t.l.toUpperCase(),fmtNum(t.latest,t.p)+unit,
+      '30d avg '+fmtNum(t.avg30,t.p),'',sparkSvg(t.spark,GC[t.g]||'#007aff'),dl);
+  }).join('');
+
+  buildPicker();
+  drawTrend();
+  drawSleep();
+  drawVs();
+  drawWeek();
+  drawWorkouts();
+  drawInsights();
+}
+
+function buildPicker(){
+  if(el('metricPick').options.length) return;
+  const byGroup={};
+  for(const [m,meta] of Object.entries(D.metrics)) (byGroup[meta.g]=byGroup[meta.g]||[]).push([m,meta]);
+  let html='';
+  for(const [g,label] of Object.entries(D.groups)){
+    if(!byGroup[g]) continue;
+    html+=`<optgroup label="${label}">`+byGroup[g].sort((a,b)=>a[1].l.localeCompare(b[1].l))
+      .map(([m,meta])=>`<option value="${m}">${meta.l}${unitOf(meta.u)?(' ('+unitOf(meta.u)+')'):''}</option>`).join('')+'</optgroup>';
+  }
+  el('metricPick').innerHTML=html;
+  PICK=D.series.step_count?'step_count':Object.keys(D.series)[0];
+  el('metricPick').value=PICK;
+  el('metricPick').onchange=e=>{PICK=e.target.value;drawTrend()};
+  el('rangePills').onclick=e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    [...el('rangePills').children].forEach(x=>x.classList.toggle('on',x===b));
+    RANGE=Number(b.dataset.r); drawTrend();
+  };
+}
+
+const rolling=(pts,n)=>{const buf=[],out=[];for(const [,v] of pts){buf.push(v);if(buf.length>n)buf.shift();
+  out.push(buf.reduce((a,b)=>a+b,0)/buf.length)}return out};
+
+function drawTrend(){
+  const pts0=D.series[PICK]; if(!pts0) return;
+  el('trendCard').hidden=false;
+  const M=D.metrics[PICK];
+  const pts=RANGE?pts0.slice(-RANGE):pts0;
+  const colour=GC[M.g]||'#007aff';
+  const s=M.stats||{};
+  const u=unitOf(M.u);
+  el('trendNote').textContent=`${pts.length} days shown · median ${fmtNum(s.med,M.p)}${u?(' '+u):''} · range ${fmtNum(s.min,M.p)}–${fmtNum(s.max,M.p)}`;
+  if(CT)CT.destroy();
+  CT=new Chart(el('trendChart'),{data:{labels:pts.map(p=>p[0].slice(5)),datasets:[
+    {type:M.agg==='sum'?'bar':'line',label:M.l,data:pts.map(p=>p[1]),
+      backgroundColor:M.agg==='sum'?colour+'cc':colour,borderColor:colour,borderRadius:3,
+      pointRadius:0,borderWidth:M.agg==='sum'?0:1.6,tension:.25,order:2},
+    {type:'line',label:'7-day average',data:rolling(pts,7),borderColor:'#1d1d1f',borderWidth:2,
+      pointRadius:0,tension:.3,borderDash:[4,3],order:1},
+  ]},options:{animation:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
+      tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtNum(c.raw,M.p)+(u?(' '+u):'')}}},
+    scales:{y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,color:'#6e6e73'},
+      beginAtZero:M.agg==='sum'},
+      x:{ticks:{maxTicksLimit:10,color:'#6e6e73',autoSkip:true},grid:{display:false}}}}});
+}
+
+function drawSleep(){
+  const need=['sleep_deep','sleep_rem','sleep_core'];
+  if(!need.some(k=>D.series[k])) return;
+  el('sleepCard').hidden=false;
+  const days=(D.series.sleep_asleep||D.series.sleep_core||[]).slice(-30).map(p=>p[0]);
+  const pick=(k)=>{const m=new Map((D.series[k]||[]).map(p=>[p[0],p[1]]));return days.map(d=>m.get(d)??null)};
+  const eff=D.series.sleep_efficiency?new Map(D.series.sleep_efficiency.map(p=>[p[0],p[1]])):null;
+  const asleep=(D.series.sleep_asleep||[]).slice(-30).map(p=>p[1]).filter(v=>v!=null);
+  const avg=asleep.length?asleep.reduce((a,b)=>a+b,0)/asleep.length:null;
+  el('sleepNote').textContent=(avg!=null?('averaging '+avg.toFixed(2)+' h asleep over the last '+asleep.length+' nights'):'')+
+    (eff?(' · efficiency '+fmtNum(D.metrics.sleep_efficiency.stats.med,1)+'% median'):'');
+  if(CS)CS.destroy();
+  CS=new Chart(el('sleepChart'),{type:'bar',data:{labels:days.map(x=>x.slice(5)),datasets:[
+    {label:'deep',data:pick('sleep_deep'),backgroundColor:'#0a3d91',stack:'s'},
+    {label:'REM',data:pick('sleep_rem'),backgroundColor:'#007aff',stack:'s'},
+    {label:'core',data:pick('sleep_core'),backgroundColor:'#8ec2ff',stack:'s'},
+    {label:'awake',data:pick('sleep_awake'),backgroundColor:'#dcdce2',stack:'s'},
+  ]},options:{animation:false,plugins:{legend:{display:false},
+    tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.raw==null?'–':c.raw.toFixed(2)+' h')}}},
+    scales:{y:{stacked:true,grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,callback:v=>v+' h',color:'#6e6e73'}},
+      x:{stacked:true,ticks:{maxTicksLimit:10,color:'#6e6e73'},grid:{display:false}}}}});
+}
+
+/* Apple Watch and Oura measure the same nights differently — worth seeing side by side. */
+function drawVs(){
+  const apple=D.series.sleep_asleep;
+  const oNights=HOME&&HOME.oura&&HOME.oura.nights;
+  if(!apple||!oNights||!oNights.length) return;
+  const om=new Map(oNights.filter(n=>n.dur!=null).map(n=>[n.day,n.dur/3600]));
+  const days=apple.map(p=>p[0]).filter(d=>om.has(d)).slice(-45);
+  if(days.length<3) return;
+  el('vsCard').hidden=false;
+  const am=new Map(apple.map(p=>[p[0],p[1]]));
+  const a=days.map(d=>am.get(d)),o=days.map(d=>om.get(d));
+  const diffs=days.map((d,i)=>a[i]-o[i]);
+  const md=diffs.reduce((x,y)=>x+y,0)/diffs.length;
+  const mae=diffs.reduce((x,y)=>x+Math.abs(y),0)/diffs.length;
+  el('vsNote').textContent=`${days.length} nights both devices recorded · Apple Watch reads ${md>=0?'+':''}${(md*60).toFixed(0)} min vs Oura on average (typical gap ${(mae*60).toFixed(0)} min)`;
+  if(CV)CV.destroy();
+  CV=new Chart(el('vsChart'),{type:'line',data:{labels:days.map(x=>x.slice(5)),datasets:[
+    {label:'Apple Watch',data:a,borderColor:'#ff3b30',backgroundColor:'#ff3b30',pointRadius:0,borderWidth:2,tension:.3},
+    {label:'Oura',data:o,borderColor:'#af52de',backgroundColor:'#af52de',pointRadius:0,borderWidth:2,tension:.3},
+  ]},options:{animation:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
+      tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.raw.toFixed(2)+' h'}}},
+    scales:{y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,callback:v=>v+' h',color:'#6e6e73'}},
+      x:{ticks:{maxTicksLimit:10,color:'#6e6e73'},grid:{display:false}}}}});
+}
+
+function drawWeek(){
+  const w=D.weekday; if(!w||!w.some(x=>x.v)) return;
+  el('weekCard').hidden=false;
+  if(CW)CW.destroy();
+  CW=new Chart(el('weekChart'),{type:'bar',data:{labels:w.map(x=>x.d),datasets:[
+    {data:w.map(x=>x.v),backgroundColor:w.map(x=>(x.d==='Sat'||x.d==='Sun')?'rgba(0,122,255,.45)':'rgba(0,122,255,.85)'),borderRadius:4}]},
+    options:{animation:false,plugins:{legend:{display:false},
+      tooltip:{callbacks:{label:c=>fmtNum(c.raw,0)+' steps average ('+w[c.dataIndex].n+' days)'}}},
+      scales:{y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:4,color:'#6e6e73'},beginAtZero:true},
+        x:{grid:{display:false},ticks:{color:'#6e6e73'}}}}});
+}
+
+function drawWorkouts(){
+  const s=D.workoutSummary||[]; if(!s.length) return;
+  el('woCard').hidden=false;
+  el('woTable').innerHTML='<tr><th>type</th><th>sessions</th><th>time</th><th>distance</th><th>energy</th></tr>'+
+    s.slice(0,10).map(w=>`<tr><td>${w.name.replace(/([a-z])([A-Z])/g,'$1 $2')}</td><td>${w.count}</td>`+
+      `<td>${Math.round(w.min/60)} h</td><td>${w.km?w.km+' km':'–'}</td><td>${fmtNum(w.kcal,0)} kcal</td></tr>`).join('');
+  const r=(D.workouts||[]).slice(0,5);
+  el('woRecent').textContent=r.length?('Most recent: '+r.map(w=>w.name.replace(/([a-z])([A-Z])/g,'$1 $2')+' '+w.day+(w.min?(' ('+Math.round(w.min)+' min)'):'')).join(' · ')):'';
+}
+
+function drawInsights(){
+  const i=D.insights||[]; if(!i.length) return;
+  el('insCard').hidden=false;
+  el('insList').innerHTML=i.map(x=>`<div style="padding:7px 0;border-bottom:1px solid #f6f6f8;font-size:13.5px">${x.text}</div>`).join('')
+    .replace(/border-bottom:1px solid #f6f6f8"(?![\s\S]*border-bottom)/,'border-bottom:0"');
+}
+
+async function unlock(pass){
+  try{
+    const p=pass!==undefined?pass:el('pw').value;
+    D=await loadEnc('/hk',p).catch(e=>{
+      // 404 just means the phone has not pushed yet — that is a real state, not an error
+      if(String(e.message).includes('no data yet')) return {empty:true,lastSync:null};
+      throw e;
+    });
+    // Oura is optional here; the sleep comparison simply hides if it is absent
+    HOME=await loadEnc('/home',p).catch(()=>null);
+    render();
+    PASS=p; localStorage.setItem('pw_pass',p); el('overlay').style.display='none';
+    setInterval(async()=>{try{
+      D=await loadEnc('/hk',PASS).catch(()=>D);
+      HOME=await loadEnc('/home',PASS).catch(()=>HOME);
+      render();
+    }catch(e){}},5*60*1000);
+  }catch(e){
+    el('overlay').style.display='flex';
+    el('pwerr').textContent=e.name==='OperationError'?'Wrong password':e.message;
+  }
+}
+window.addEventListener('load',()=>{
+  const saved=localStorage.getItem('pw_pass');
+  if(saved) unlock(saved); else el('overlay').style.display='flex';
+});
+el('pw').addEventListener('keydown',e=>{if(e.key==='Enter')unlock()});
+</script>
+</body>
+</html>
