@@ -28,7 +28,7 @@
   .card h3{font-size:13px;font-weight:600;color:var(--dim)}
   .card .v{font-size:30px;font-weight:700;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .card .v .u{font-size:14px;font-weight:600;color:var(--dim);margin-left:4px;letter-spacing:0}
-  .card .m{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card .m{font-size:12px;color:var(--dim)}
   .ok{color:var(--mint)} .warn{color:var(--pink)} .mid{color:var(--sun)}
   .err{color:var(--pink);font-size:13px;margin:10px 0}
   .badge{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:5px 12px;font-size:12px;font-weight:600;margin-bottom:14px}
@@ -57,8 +57,7 @@
   #overlay button{background:#0071e3;color:#fff;border:0;font-weight:600;cursor:pointer;border-radius:980px;padding:8px 16px}
   .hint{font-size:12px;color:var(--dim);margin-top:8px}
   h4.sec{font-size:12px;font-weight:700;color:var(--dim);letter-spacing:.04em;margin:22px 0 2px}
-  .sech{font-size:12px;color:var(--dim);margin-bottom:10px;max-width:70ch;
-    white-space:normal;overflow:visible;text-overflow:clip}
+  .card .sech{font-size:12px;color:var(--dim);margin-bottom:10px;max-width:70ch}
   #runCard canvas{max-height:300px}
 </style>
 </head>
@@ -388,9 +387,9 @@ function drawRunning(){
   const delta=(recent!=null&&earlier!=null)?(earlier-recent)*60:null; // seconds/km faster
   el('runTiles').innerHTML=[
     tile('MEDIAN PACE',fmtPace(paces[Math.floor(paces.length/2)])+'<span class="u">/km</span>',
-      delta==null?'':`${Math.abs(delta).toFixed(0)}s/km ${delta>0?'faster':'slower'} than earlier half`,delta>0?'ok':(delta<0?'warn':'')),
-    tile('BEST PACE',fmtPace(best.pace)+'<span class="u">/km</span>',`${best.km.toFixed(2)} km on ${best.day}`),
-    tile('LONGEST',longest.km.toFixed(2)+'<span class="u">km</span>',`${fmtPace(longest.pace)}/km on ${longest.day}`),
+      delta==null?'':`${Math.abs(delta).toFixed(0)}s/km ${delta>0?'faster':'slower'} than the earlier half`,delta>0?'ok':(delta<0?'warn':'')),
+    tile('BEST PACE',fmtPace(best.pace)+'<span class="u">/km</span>',`${best.km.toFixed(2)} km · ${best.day}`),
+    tile('LONGEST',longest.km.toFixed(2)+'<span class="u">km</span>',`${fmtPace(longest.pace)}/km · ${longest.day}`),
     tile('DISTANCE',km.toFixed(0)+'<span class="u">km</span>',`across ${R.length} runs`),
     vo2Now!=null?tile('VO₂ MAX',vo2Now.toFixed(1)+'<span class="u">ml/kg·min</span>',
       `${vo2[0][0]} → today: ${(vo2Now-vo2[0][1]>=0?'+':'')}${(vo2Now-vo2[0][1]).toFixed(1)}`,vo2Now>=vo2[0][1]?'ok':''):'',
@@ -442,7 +441,10 @@ function drawPace(R){
 }
 
 function drawVo2(R){
-  const pb=paceBounds(rollingMedian(R.map(r=>r.pace),5),0.2,0.2);
+  // The rolling median is already smoothed, so bound it by its true extent.
+  // Percentile bounds here clipped the line into disconnected fragments.
+  const medAll=rollingMedian(R.map(r=>r.pace),5);
+  const pb={min:Math.min(...medAll)-0.15,max:Math.max(...medAll)+0.15};
   const vo2=(D.series.vo2_max||[]).map(p=>({x:dnum(p[0]),y:p[1]}));
   if(!vo2.length){el('vo2Chart').style.display='none';return}
   el('vo2Chart').style.display='';
