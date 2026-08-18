@@ -76,6 +76,7 @@
     <li>Set the URL to <code>https://powerwall-api.randlefamily.com/hk/ingest</code></li>
     <li>Add a header <code>x-api-key</code> with your <code>HK_TOKEN</code> value.</li>
     <li>Format <b>JSON</b>, aggregation <b>Hourly</b>, date range <b>Since Last Sync</b>, frequency <b>every 1 hour</b>, and turn <b>Batch Requests</b> on.</li>
+    <li>For a one-off history pull, use a second automation with a wide date range and aggregation <b>Daily</b> — hourly resolution over years is millions of points and will time out.</li>
     <li>Select the metrics you want — Activity, Heart, Sleep and Body are all understood, plus workouts.</li>
   </ol>
   <div class="hint">Historical data: run the backfill script against your Health app export to load everything from before today.</div>
