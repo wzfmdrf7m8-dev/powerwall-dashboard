@@ -314,6 +314,15 @@ function render(){
       ['sleep',drawSleep],['vs',drawVs],['week',drawWeek],['workouts',drawWorkouts],['insights',drawInsights]]){
     try{ fn() }catch(e){ console.error('render/'+name+':',e) }
   }
+  /* A chart built while its card was still hidden measures a parent that has no
+     width yet, and keeps that wrong size forever — the trend panel was drawing
+     at 600px inside a 1072px card. Re-measure once layout has settled. */
+  requestAnimationFrame(()=>{
+    for(const c of document.querySelectorAll('.chartbox canvas')){
+      const ch=window.Chart&&Chart.getChart(c);
+      if(ch) try{ ch.resize() }catch(e){}
+    }
+  });
 }
 
 function buildPicker(){
