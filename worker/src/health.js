@@ -97,14 +97,18 @@ const SLEEP_FIELDS = { asleep: "sleep_asleep", totalSleep: "sleep_asleep", inBed
   core: "sleep_core", deep: "sleep_deep", rem: "sleep_rem", awake: "sleep_awake" };
 const SKIP_KEYS = new Set(["date", "source", "units", "sleepStart", "sleepEnd", "inBedStart", "inBedEnd", "mealTime", "id"]);
 
-export function hkFlatten(payload) {
+/**
+ * @param opts.dayAgg  true when each datum is a whole-day total rather than a
+ *   slice of one. Health Auto Export tells us this in its automation-aggregation
+ *   header; our own backfill sets data.meta.backfill. Getting it wrong in the
+ *   "false" direction double-counts a day; getting it wrong in the "true"
+ *   direction loses part of one. Never guess it from the data shape.
+ */
+export function hkFlatten(payload, opts = {}) {
   const root = (payload && payload.data) || payload || {};
   const records = [], workouts = [];
   let skipped = 0;
-  // A historical backfill sends ONE pre-totalled value per metric per day. Live
-  // syncs send one per hour. Mixing the two by addition would double-count every
-  // overlapping day, so day-totals are tracked separately from hourly parts.
-  const dayAgg = !!(root.meta && root.meta.backfill);
+  const dayAgg = !!opts.dayAgg || !!(root.meta && root.meta.backfill);
 
   for (const metric of root.metrics || []) {
     const name = metric && metric.name, units = metric && metric.units;
@@ -411,12 +415,16 @@ export async function hkIngest(request, env) {
   try { payload = await request.json(); }
   catch (e) { return new Response("invalid JSON", { status: 400 }); }
 
-  const { records, workouts, skipped } = hkFlatten(payload);
+  // "Daily" and coarser mean each value already covers a whole day. Anything
+  // hourly or finer is a slice. The app sends this on every automation request.
+  const agg = String(request.headers.get("automation-aggregation") || "");
+  const dayAgg = /day|daily|week|month|year/i.test(agg) && !/hour|min|sec/i.test(agg);
+  const { records, workouts, skipped } = hkFlatten(payload, { dayAgg });
   if (!records.length && !workouts.length)
     return json({ ok: true, stored: 0, skipped, note: "nothing recognisable in payload" });
 
   const key = `hk/raw/${new Date().toISOString()}-${crypto.randomUUID().slice(0, 8)}.ndjson`;
-  const lines = [JSON.stringify({ __b: 1, at: new Date().toISOString(), a: request.headers.get("automation-name") || null })]
+  const lines = [JSON.stringify({ __b: 1, at: new Date().toISOString(), a: request.headers.get("automation-name") || null, g: agg || null })]
     .concat(records.map((r) => JSON.stringify(r)))
     .concat(workouts.map((w) => JSON.stringify({ __w: 1, ...w })));
   await env.PW.put(key, lines.join("\n"), { httpMetadata: { contentType: "application/x-ndjson" } });
