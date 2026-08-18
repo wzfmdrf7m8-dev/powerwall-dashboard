@@ -638,7 +638,7 @@ function drawVolume(R){
   CVOL=new Chart(el('volChart'),{type:'bar',data:{labels:months,datasets:[
     {label:'outdoor',data:months.map(m=>+by[m].out.toFixed(1)),backgroundColor:'rgba(255,59,48,.75)',stack:'s',borderRadius:3},
     {label:'indoor',data:months.map(m=>+by[m].in.toFixed(1)),backgroundColor:'rgba(0,122,255,.7)',stack:'s',borderRadius:3},
-  ]},options:{animation:false,plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
+  ]},options:{animation:false,maintainAspectRatio:false,plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
     tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw} km`}}},
     scales:{y:{stacked:true,beginAtZero:true,grid:{color:'rgba(0,0,0,.06)'},
       ticks:{maxTicksLimit:5,color:'#6e6e73',callback:v=>v+' km'}},
@@ -700,7 +700,7 @@ function drawTrend(){
       pointRadius:0,borderWidth:M.agg==='sum'?0:1.6,tension:.25,order:2},
     {type:'line',label:'7-day average',data:rolling(pts,7),borderColor:'#1d1d1f',borderWidth:2,
       pointRadius:0,tension:.3,borderDash:[4,3],order:1},
-  ]},options:{animation:false,interaction:{mode:'index',intersect:false},
+  ]},options:{animation:false,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
     plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
       tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtNum(c.raw,M.p)+(u?(' '+u):'')}}},
     scales:{y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,color:'#6e6e73'},
@@ -765,7 +765,7 @@ function drawVs(){
   CV=new Chart(el('vsChart'),{type:'line',data:{labels:days.map(x=>x.slice(5)),datasets:[
     {label:'Apple Watch',data:a,borderColor:'#ff3b30',backgroundColor:'#ff3b30',pointRadius:0,borderWidth:2,tension:.3},
     {label:'Oura',data:o,borderColor:'#af52de',backgroundColor:'#af52de',pointRadius:0,borderWidth:2,tension:.3},
-  ]},options:{animation:false,interaction:{mode:'index',intersect:false},
+  ]},options:{animation:false,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
     plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
       tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.raw.toFixed(2)+' h'}}},
     scales:{y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{maxTicksLimit:5,callback:v=>v+' h',color:'#6e6e73'}},
