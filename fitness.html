@@ -142,10 +142,17 @@ async function deriveKey(pass,salt){
   const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
   return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:200000,hash:'SHA-256'},km,{name:'AES-CBC',length:256},false,['decrypt']);
 }
+const notReady=msg=>{const e=new Error(msg);e.code='NOTREADY';return e};
 async function loadEnc(path,pass){
   const res=await fetch(`${WORKER}${path}?_=${Date.now()}`,{cache:'no-store'});
-  if(!res.ok) throw new Error(res.status===404?'no data yet':('fetch failed ('+res.status+')'));
-  const raw=Uint8Array.from(atob((await res.text()).trim()),c=>c.charCodeAt(0));
+  if(res.status===404) throw notReady('no data yet');
+  if(!res.ok) throw new Error('fetch failed ('+res.status+')');
+  const txt=(await res.text()).trim();
+  // A worker without this route falls through to a plain-text response. Decrypting
+  // that yields OperationError, which the UI would report as "wrong password" —
+  // the single most misleading thing it could say. Check the shape first.
+  if(!/^[A-Za-z0-9+/=]+$/.test(txt)||txt.length<64) throw notReady('endpoint not deployed yet');
+  const raw=Uint8Array.from(atob(txt),c=>c.charCodeAt(0));
   const key=await deriveKey(pass,raw.slice(0,16));
   const pt=await crypto.subtle.decrypt({name:'AES-CBC',iv:raw.slice(16,32)},key,raw.slice(32));
   return JSON.parse(new TextDecoder().decode(pt));
@@ -195,7 +202,8 @@ function render(){
 
   if(!d||d.empty){
     el('setup').hidden=false;
-    el('sub').textContent='Apple Health · nothing received yet';
+    el('sub').textContent='Apple Health · '+(d&&d.notReady==='endpoint not deployed yet'
+      ? 'waiting for the worker to deploy' : 'nothing received yet');
     ['trendCard','sleepCard','vsCard','weekCard','woCard','insCard'].forEach(i=>el(i).hidden=true);
     el('cards').innerHTML='';
     return;
@@ -364,8 +372,9 @@ async function unlock(pass){
   try{
     const p=pass!==undefined?pass:el('pw').value;
     D=await loadEnc('/hk',p).catch(e=>{
-      // 404 just means the phone has not pushed yet — that is a real state, not an error
-      if(String(e.message).includes('no data yet')) return {empty:true,lastSync:null};
+      // No data yet, or the route is not deployed — both are real states to show
+      // the setup panel for, not reasons to challenge the password.
+      if(e.code==='NOTREADY') return {empty:true,lastSync:null,notReady:e.message};
       throw e;
     });
     // Oura is optional here; the sleep comparison simply hides if it is absent
