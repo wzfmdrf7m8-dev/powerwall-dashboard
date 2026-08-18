@@ -59,6 +59,12 @@
   h4.sec{font-size:12px;font-weight:700;color:var(--dim);letter-spacing:.04em;margin:22px 0 2px}
   .card .sech{font-size:12px;color:var(--dim);margin-bottom:10px;max-width:70ch}
   #runCard canvas{max-height:300px}
+  .bench{margin-bottom:20px}
+  .bench .hdr{font-size:13.5px;margin-bottom:8px}
+  .bench .hdr b{font-weight:700}
+  .bench .none{font-size:13px;color:var(--dim)}
+  .bench table{margin-top:10px}
+  .up{color:var(--mint);font-weight:600} .down{color:var(--pink);font-weight:600}
 </style>
 </head>
 <body>
@@ -91,7 +97,7 @@
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
     <h3 style="margin:0">RUNNING</h3>
     <div class="pills" style="margin:0" id="runType">
-      <button data-t="all" class="on">All runs</button><button data-t="out">Outdoor</button><button data-t="in">Indoor</button>
+      <button data-t="all" class="on">All runs</button><button data-t="out">Outdoor</button><button data-t="in">Indoor</button><button data-t="un">Unlabelled</button>
     </div>
     <div class="pills" style="margin:0 0 0 auto" id="runRange">
       <button data-r="180">6m</button><button data-r="365" class="on">1y</button><button data-r="730">2y</button><button data-r="0">All</button>
@@ -99,6 +105,10 @@
   </div>
   <div class="m" id="runNote" style="color:var(--dim);font-size:12px;margin-bottom:12px"></div>
   <div class="grid" id="runTiles" style="margin-bottom:16px"></div>
+
+  <h4 class="sec">5K &amp; 10K BENCHMARK — LAST 14 DAYS</h4>
+  <div class="m sech">Only runs at benchmark distance, against your median for that distance over the 90 days before this window. Comparing like with like: a 5K and a 12K are not the same test, and averaging them together hides both.</div>
+  <div id="bench"></div>
 
   <h4 class="sec">PACE PER RUN</h4>
   <div class="m sech">Every run plotted individually. Higher is faster; dot size is distance. The line is a 5-run rolling median, which is the honest read of a trend — single runs swing on weather, hills and how you slept.</div>
@@ -320,6 +330,10 @@ function buildPicker(){
 const RUN_RE=/run|jog|treadmill/i;
 const isIndoor=n=>/indoor|treadmill/i.test(n);
 const isOutdoor=n=>/outdoor/i.test(n);
+/* Oura and some other sources log a treadmill session as a bare "Run" with no
+   indoor/outdoor marker. Calling that outdoor would be a guess, so it gets its
+   own bucket and its own colour rather than quietly padding the outdoor set. */
+const runKind=n=>isIndoor(n)?'in':isOutdoor(n)?'out':'un';
 const fmtPace=p=>{if(p==null||!isFinite(p))return'–';const m=Math.floor(p),sec=Math.round((p-m)*60);
   return sec===60?`${m+1}:00`:`${m}:${String(sec).padStart(2,'0')}`};
 const dnum=d=>new Date(d+'T12:00:00Z').getTime();
@@ -338,7 +352,7 @@ function runs(){
   return (D.workouts||[])
     .filter(w=>RUN_RE.test(w.name)&&w.km>0.5&&w.min>3)
     .map(w=>({...w,pace:w.min/w.km,kmh:w.km/(w.min/60),t:dnum(w.day),
-      indoor:isIndoor(w.name),outdoor:isOutdoor(w.name)}))
+      indoor:isIndoor(w.name),outdoor:isOutdoor(w.name),kind:runKind(w.name)}))
     // a 2 min/km human does not exist and a 15 min/km one is walking: both are
     // bad distance data rather than runs, and they wreck the y axis.
     .filter(w=>w.pace>2.5&&w.pace<15)
@@ -346,8 +360,7 @@ function runs(){
 }
 function runsFiltered(){
   const all=runs();
-  const byType=RUNTYPE==='in'?all.filter(r=>r.indoor)
-    :RUNTYPE==='out'?all.filter(r=>!r.indoor):all;
+  const byType=RUNTYPE==='all'?all:all.filter(r=>r.kind===RUNTYPE);
   if(!RUNRANGE) return byType;
   const cut=Date.now()-RUNRANGE*864e5;
   return byType.filter(r=>r.t>=cut);
@@ -365,7 +378,7 @@ function drawRunning(){
   if(all.length<3){el('runCard').hidden=true;return}
   el('runCard').hidden=false;
   const R=runsFiltered();
-  const label=RUNTYPE==='in'?'indoor runs':RUNTYPE==='out'?'outdoor runs':'runs';
+  const label={in:'indoor runs',out:'outdoor runs',un:'unlabelled runs'}[RUNTYPE]||'runs';
   if(!R.length){el('runNote').textContent=`No ${label} in this window.`;
     [CP,CO,CE,CVOL,CF].forEach(c=>c&&c.destroy());CP=CO=CE=CVOL=CF=null;
     el('runTiles').innerHTML='';el('runTable').innerHTML='';return}
@@ -397,7 +410,7 @@ function drawRunning(){
 
   // Each panel is isolated: a failure in one must not cost the reader the
   // other six. The console keeps the detail for whoever is debugging.
-  for(const [name,fn] of [['pace',()=>drawPace(R)],['vo2',()=>drawVo2(R)],['eff',()=>drawEff(R)],
+  for(const [name,fn] of [['bench',drawBench],['pace',()=>drawPace(R)],['vo2',()=>drawVo2(R)],['eff',()=>drawEff(R)],
       ['volume',()=>drawVolume(R)],['form',()=>{buildFormPicker();drawForm()}],['table',()=>drawRunTable(R)]]){
     try{ fn() }catch(e){ console.error('running/'+name+':',e) }
   }
@@ -415,16 +428,113 @@ function paceBounds(vals,padLo=0.3,padHi=0.4){
   const q=p=>s[Math.min(s.length-1,Math.floor(p*(s.length-1)))];
   return {min:Math.max(2.5,q(0.02)-padLo), max:Math.min(15,q(0.98)+padHi)};
 }
+
+/* ---------------------------------------------------------------------------
+   5K / 10K benchmark, last 14 days
+   Like-for-like only. A 5K and a 12K are different tests, so each distance is
+   judged against its own recent history rather than against your runs at large.
+--------------------------------------------------------------------------- */
+const BANDS=[{key:'5K',lo:4.5,hi:5.6,label:'5K'},{key:'10K',lo:9.0,hi:11.0,label:'10K'}];
+const WINDOW_DAYS=14, BASE_DAYS=90;
+const medOf=a=>{const x=[...a].sort((p,q)=>p-q);return x.length?x[Math.floor(x.length/2)]:null};
+const dayAgo=n=>new Date(Date.now()-n*864e5).toISOString().slice(0,10);
+
+function drawBench(){
+  const all=runs();
+  const w0=dayAgo(WINDOW_DAYS), b0=dayAgo(WINDOW_DAYS+BASE_DAYS);
+  const blocks=[];
+  let anyChart=[];
+
+  for(const b of BANDS){
+    const inBand=r=>r.km>=b.lo&&r.km<=b.hi;
+    const recent=all.filter(r=>inBand(r)&&r.day>=w0);
+    let base=all.filter(r=>inBand(r)&&r.day<w0&&r.day>=b0);
+    let baseNote=`${base.length} runs in the ${BASE_DAYS} days before`;
+    // Not enough recent history to be a fair yardstick — widen rather than
+    // compare against two runs and call it a trend.
+    if(base.length<3){
+      base=all.filter(r=>inBand(r)&&r.day<w0);
+      baseNote=`${base.length} earlier runs (not enough in the last ${BASE_DAYS} days)`;
+    }
+    const basePace=base.length?medOf(base.map(r=>r.pace)):null;
+    const baseHr=base.filter(r=>r.hrAvg!=null).length?medOf(base.filter(r=>r.hrAvg!=null).map(r=>r.hrAvg)):null;
+
+    if(!recent.length){
+      const last=all.filter(inBand).pop();
+      blocks.push(`<div class="bench"><div class="hdr"><b>${b.label}</b> — none in the last ${WINDOW_DAYS} days.</div>`+
+        `<div class="none">${last?`Your most recent was <b>${fmtPace(last.pace)}/km</b> over ${last.km.toFixed(2)} km on ${last.day}.`
+          :'No run at this distance on record yet — it will appear here the first time you do one.'}</div></div>`);
+      continue;
+    }
+
+    const recPace=medOf(recent.map(r=>r.pace));
+    const recHr=recent.filter(r=>r.hrAvg!=null).length?medOf(recent.filter(r=>r.hrAvg!=null).map(r=>r.hrAvg)):null;
+    const dPace=basePace!=null?(basePace-recPace)*60:null;      // +ve = faster
+    const dHr=(baseHr!=null&&recHr!=null)?(recHr-baseHr):null;   // +ve = harder
+
+    let verdict='';
+    if(dPace!=null){
+      const dir=dPace>=0?'faster':'slower';
+      const cls=dPace>=0?'up':'down';
+      verdict=`<b>${fmtPace(recPace)}/km</b> median over ${recent.length} run${recent.length>1?'s':''}, `+
+        `<span class="${cls}">${Math.abs(dPace).toFixed(0)}s/km ${dir}</span> than your ${fmtPace(basePace)}/km baseline`;
+      if(dHr!=null) verdict+=` — at ${Math.abs(dHr).toFixed(0)} bpm ${dHr>0?'higher':'lower'} heart rate`;
+      verdict+='.';
+    }
+    blocks.push(`<div class="bench"><div class="hdr"><b>${b.label}</b> — ${verdict}</div>`+
+      `<div class="none">Baseline: median of ${baseNote}.</div>`+
+      `<canvas id="bench${b.key}" height="${Math.max(90,40+recent.length*26)}"></canvas>`+
+      `<table id="benchT${b.key}"></table></div>`);
+    anyChart.push({b,recent,basePace,baseHr});
+  }
+
+  el('bench').innerHTML=blocks.join('');
+
+  for(const {b,recent,basePace,baseHr} of anyChart){
+    const rows=[...recent].sort((x,y)=>x.t-y.t);
+    const deltas=rows.map(r=>+(((basePace-r.pace)*60)).toFixed(1));
+    const cv=el('bench'+b.key);
+    if(!cv) continue;
+    new Chart(cv,{type:'bar',data:{labels:rows.map(r=>r.day.slice(5)),datasets:[{
+      label:'s/km vs baseline',data:deltas,
+      backgroundColor:deltas.map(d=>d>=0?'rgba(52,199,89,.8)':'rgba(255,59,48,.8)'),borderRadius:3}]},
+      options:{animation:false,maintainAspectRatio:false,indexAxis:'y',
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{
+          const r=rows[c.dataIndex];
+          return `${fmtPace(r.pace)}/km · ${r.km.toFixed(2)} km`+(r.hrAvg!=null?` · ${Math.round(r.hrAvg)} bpm`:'')+
+            ` · ${c.raw>=0?'+':''}${c.raw}s/km vs baseline`;
+        }}}},
+        scales:{x:{grid:{color:'rgba(0,0,0,.06)'},ticks:{color:'#6e6e73',callback:v=>(v>0?'+':'')+v+'s'},
+          title:{display:true,text:'seconds per km vs baseline — right is faster',color:'#6e6e73',font:{size:11}}},
+          y:{grid:{display:false},ticks:{color:'#6e6e73'}}}}});
+
+    const t=el('benchT'+b.key);
+    if(t) t.innerHTML='<tr><th>date</th><th>distance</th><th>pace</th><th>vs baseline</th><th>HR</th></tr>'+
+      [...rows].reverse().map(r=>{
+        const d=(basePace-r.pace)*60;
+        // Words, not signs. The chart plots "faster" to the right as positive
+        // while a pace delta in seconds is negative when faster — two opposite
+        // conventions in one panel is a guaranteed misread.
+        return `<tr><td>${r.day}</td><td>${r.km.toFixed(2)} km</td><td><b>${fmtPace(r.pace)}</b>/km</td>`+
+          `<td class="${d>=0?'up':'down'}">${Math.abs(d).toFixed(0)}s/km ${d>=0?'faster':'slower'}</td>`+
+          `<td>${r.hrAvg!=null?Math.round(r.hrAvg)+' bpm':'–'}</td></tr>`;
+      }).join('');
+  }
+}
+
 function drawPace(R){
   const med=rollingMedian(R.map(r=>r.pace),5);
   const b=paceBounds(R.map(r=>r.pace));
   if(CP)CP.destroy();
   CP=new Chart(el('paceChart'),{type:'scatter',data:{datasets:[
-    {type:'scatter',label:'outdoor',data:R.filter(r=>!r.indoor).map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
+    {type:'scatter',label:'outdoor',data:R.filter(r=>r.kind==='out').map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
       backgroundColor:'rgba(255,59,48,.55)',borderColor:'rgba(255,59,48,.9)',
       pointRadius:ptR(),pointHoverRadius:12},
-    {type:'scatter',label:'indoor',data:R.filter(r=>r.indoor).map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
+    {type:'scatter',label:'indoor',data:R.filter(r=>r.kind==='in').map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
       backgroundColor:'rgba(0,122,255,.5)',borderColor:'rgba(0,122,255,.9)',
+      pointRadius:ptR(),pointHoverRadius:12},
+    {type:'scatter',label:'unlabelled',data:R.filter(r=>r.kind==='un').map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
+      backgroundColor:'rgba(175,82,222,.45)',borderColor:'rgba(175,82,222,.85)',
       pointRadius:ptR(),pointHoverRadius:12},
     {type:'line',label:'5-run median',data:R.map((r,i)=>({x:r.t,y:med[i]})),
       borderColor:'#1d1d1f',borderWidth:2,pointRadius:0,tension:.3},
@@ -490,12 +600,13 @@ function drawEff(R){
 
 function drawVolume(R){
   const by={};
-  for(const r of R){const k=r.day.slice(0,7);(by[k]=by[k]||{out:0,in:0})[r.indoor?'in':'out']+=r.km}
+  for(const r of R){const k=r.day.slice(0,7);(by[k]=by[k]||{out:0,in:0,un:0})[r.kind]+=r.km}
   const months=Object.keys(by).sort();
   if(CVOL)CVOL.destroy();
   CVOL=new Chart(el('volChart'),{type:'bar',data:{labels:months,datasets:[
     {label:'outdoor',data:months.map(m=>+by[m].out.toFixed(1)),backgroundColor:'rgba(255,59,48,.75)',stack:'s',borderRadius:3},
     {label:'indoor',data:months.map(m=>+by[m].in.toFixed(1)),backgroundColor:'rgba(0,122,255,.7)',stack:'s',borderRadius:3},
+    {label:'unlabelled',data:months.map(m=>+by[m].un.toFixed(1)),backgroundColor:'rgba(175,82,222,.6)',stack:'s',borderRadius:3},
   ]},options:{animation:false,plugins:{legend:{labels:{boxWidth:8,usePointStyle:true,font:{size:11}}},
     tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.raw} km`}}},
     scales:{y:{stacked:true,beginAtZero:true,grid:{color:'rgba(0,0,0,.06)'},
