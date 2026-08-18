@@ -327,7 +327,12 @@ const dnum=d=>new Date(d+'T12:00:00Z').getTime();
    attached (dataset-level resolution, legend items, hover probes). Reading
    c.raw.km directly throws there, and one throw inside a chart config aborts
    the whole render - which is how a dot-size tweak blanked the entire page. */
-const ptR=(c,k=0.8,max=11)=>{const km=(c&&c.raw&&c.raw.km)||0;return Math.max(3,Math.min(max,2+km*k))};
+/* A FACTORY, not a scriptable option itself. Chart.js invokes scriptable
+   options as fn(context, options), so a function taking (context, scale, max)
+   silently receives the options object as `scale` and returns NaN — which
+   Chart.js then mis-resolves into its colour parser and throws. Returning a
+   one-argument closure makes that mistake impossible to make. */
+const ptR=(k=0.8,max=11)=>c=>{const km=(c&&c.raw&&c.raw.km)||0;return Math.max(3,Math.min(max,2+km*k))};
 
 function runs(){
   return (D.workouts||[])
@@ -409,10 +414,10 @@ function drawPace(R){
   CP=new Chart(el('paceChart'),{type:'scatter',data:{datasets:[
     {type:'scatter',label:'outdoor',data:R.filter(r=>!r.indoor).map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
       backgroundColor:'rgba(255,59,48,.55)',borderColor:'rgba(255,59,48,.9)',
-      pointRadius:ptR,pointHoverRadius:12},
+      pointRadius:ptR(),pointHoverRadius:12},
     {type:'scatter',label:'indoor',data:R.filter(r=>r.indoor).map(r=>({x:r.t,y:r.pace,km:r.km,d:r.day,n:r.name})),
       backgroundColor:'rgba(0,122,255,.5)',borderColor:'rgba(0,122,255,.9)',
-      pointRadius:ptR,pointHoverRadius:12},
+      pointRadius:ptR(),pointHoverRadius:12},
     {type:'line',label:'5-run median',data:R.map((r,i)=>({x:r.t,y:med[i]})),
       borderColor:'#1d1d1f',borderWidth:2,pointRadius:0,tension:.3},
   ]},options:{animation:false,maintainAspectRatio:false,
@@ -461,7 +466,7 @@ function drawEff(R){
     data:W.map(r=>({x:r.hrAvg,y:r.pace,d:r.day,km:r.km,n:r.name,a:(r.t-t0)/span})),
     // recency as opacity: the eye reads the darker cloud as "now"
     backgroundColor:c=>`rgba(175,82,222,${(0.18+0.72*((c.raw&&c.raw.a)??1)).toFixed(2)})`,
-    pointRadius:c=>ptR(c,0.7,10),pointHoverRadius:12}]},
+    pointRadius:ptR(0.7,10),pointHoverRadius:12}]},
     options:{animation:false,maintainAspectRatio:false,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>`${c.raw.d}: ${fmtPace(c.raw.y)}/km at ${c.raw.x.toFixed(0)} bpm · ${c.raw.km.toFixed(2)} km`}}},
       scales:{x:{title:{display:true,text:'average heart rate (bpm)',color:'#6e6e73',font:{size:11}},
