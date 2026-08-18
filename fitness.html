@@ -62,8 +62,11 @@
      Without a fixed-height parent the canvas grows, which grows the parent,
      which grows the canvas — sleepChart reached 25,714px this way. A relative
      box with an explicit height ends the feedback loop. */
+  /* Constrain the PARENT only. Forcing the canvas's own width/height with
+     !important overrides the size Chart.js set for the backing store, so the
+     bitmap gets stretched — 1120px of pixels smeared across 2144px of CSS,
+     which is why the text looked blown up and soft. */
   .chartbox{position:relative;width:100%}
-  .chartbox canvas{position:absolute;inset:0;width:100%!important;height:100%!important}
   .bench{margin-bottom:20px}
   .bench .hdr{font-size:13.5px;margin-bottom:8px}
   .bench .hdr b{font-weight:700}
@@ -733,6 +736,21 @@ function drawVs(){
   const diffs=days.map((d,i)=>a[i]-o[i]);
   const md=diffs.reduce((x,y)=>x+y,0)/diffs.length;
   const mae=diffs.reduce((x,y)=>x+Math.abs(y),0)/diffs.length;
+
+  /* If the two agree to the minute night after night they are not two
+     measurements — the ring is writing sleep into Health and we would be
+     comparing one source with itself. Say so rather than draw a chart whose
+     only honest reading is "these lines are the same line". */
+  const agree=diffs.filter(v=>Math.abs(v)*60<3).length;
+  if(days.length>=4 && agree/days.length>=0.8){
+    showChart('vsChart',false);
+    el('vsNote').innerHTML=`Your Health sleep data <b>is</b> the Oura data — the two agree to within `+
+      `${(mae*60).toFixed(1)} minutes on ${agree} of ${days.length} nights, so the ring is writing sleep `+
+      `into Apple Health rather than the watch measuring it independently. There is nothing to compare `+
+      `until you also record sleep on the watch, at which point this chart returns on its own.`;
+    return;
+  }
+  showChart('vsChart',true);
   el('vsNote').textContent=`${days.length} nights both devices recorded · Apple Watch reads ${md>=0?'+':''}${(md*60).toFixed(0)} min vs Oura on average (typical gap ${(mae*60).toFixed(0)} min)`;
   if(CV)CV.destroy();
   CV=new Chart(el('vsChart'),{type:'line',data:{labels:days.map(x=>x.slice(5)),datasets:[
