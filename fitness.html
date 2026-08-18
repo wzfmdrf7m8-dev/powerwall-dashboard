@@ -88,7 +88,9 @@
     <li>Format <b>JSON</b>, aggregation <b>Hourly</b>, date range <b>Since Last Sync</b>, frequency <b>every 1 hour</b>, and turn <b>Batch Requests</b> on.</li>
     <li>For a one-off history pull, use a second automation with a wide date range and aggregation <b>Daily</b> — hourly resolution over years is millions of points and will time out.</li>
     <li>Select the metrics you want — Activity, Heart, Sleep and Body are all understood, plus workouts.</li>
+    <li>Settings → General → <b>Background App Refresh</b> must be on for the app.</li>
   </ol>
+  <div class="hint"><b>Why gaps are normal:</b> iOS does not let any app read Health data while the phone is locked, and it schedules background work when it suits the system rather than on the hour. So the automation only fires while you are actually using the phone — expect nothing overnight, and a catch-up in the morning. Adding the app's Automations widget to your home screen, or opening the app for a moment, forces a sync immediately.</div>
   <div class="hint">Historical data: run the backfill script against your Health app export to load everything from before today.</div>
 </div>
 
@@ -238,14 +240,23 @@ const SHORT_UNIT={'ml/kg/min':'ml/kg·min','br/min':'br/min','dBASPL':'dB'};
 // "count" is HealthKit's placeholder for "no unit" — never show it
 const unitOf=u=>(!u||u==='count')?'':(SHORT_UNIT[u]||u);
 
-/* ---- sync freshness: this pill is only meaningful if the phone is pushing ---- */
+/* ---- sync freshness -------------------------------------------------------
+   iOS forbids apps from reading Health data while the phone is LOCKED, so the
+   hourly automation only fires when you happen to be using the phone. A gap
+   overnight is normal, not a fault, and flagging it every morning would train
+   you to ignore the one indicator that matters. Hence a wide quiet band.
+--------------------------------------------------------------------------- */
+const SYNC_FRESH_H=6, SYNC_DEAD_H=36;
 function renderBadge(d){
   const last=d&&d.lastSync;
   if(!last){ el('badge').innerHTML='<div class="badge dead"><i class="dot"></i>No sync yet</div>'; return 'dead'; }
   const hrs=(Date.now()-new Date(last).getTime())/36e5;
-  const state=hrs<6?'live':(hrs<48?'stale':'dead');
+  const state=hrs<SYNC_FRESH_H?'live':(hrs<SYNC_DEAD_H?'stale':'dead');
   const label=state==='live'?('Syncing · last '+ago(last)):('Last synced '+ago(last));
-  el('badge').innerHTML=`<div class="badge ${state}"><i class="dot"></i>${label}${d.lastAutomation?(' · '+d.lastAutomation):''}</div>`;
+  const note=state==='stale'
+    ? ' · normal if your phone has been locked'
+    : (state==='dead'?' · check the automation':'');
+  el('badge').innerHTML=`<div class="badge ${state}"><i class="dot"></i>${label}${d.lastAutomation?(' · '+d.lastAutomation):''}${note}</div>`;
   return state;
 }
 
@@ -267,7 +278,7 @@ function render(){
   el('setup').hidden=(state!=='dead');
   if(state==='dead'){
     el('setupTitle').textContent='Sync has stopped — the figures below are the last received';
-    el('setupNote').textContent='Nothing has arrived from your iPhone in over 48 hours. Check the Health Auto Export automation is still enabled and that the phone has run it recently.';
+    el('setupNote').textContent='Nothing has arrived from your iPhone in over 36 hours. That is longer than a locked phone explains — check the automation is still enabled, that Background App Refresh is on, and that the app has not been force-quit from the app switcher.';
   }
 
   el('sub').textContent=[
