@@ -230,9 +230,11 @@ const fmtNum=(v,p)=>v==null?'–':Number(v).toLocaleString(undefined,{minimumFra
 const ago=iso=>{
   if(!iso) return null;
   const mins=Math.max(0,(Date.now()-new Date(iso).getTime())/60000);
+  if(mins<1) return 'just now';
   if(mins<90) return Math.round(mins)+' min ago';
   if(mins<48*60) return Math.round(mins/60)+' hours ago';
-  return Math.round(mins/1440)+' days ago';
+  const d=Math.round(mins/1440);
+  return d+' day'+(d===1?'':'s')+' ago';
 };
 function card(h,v,m,cls,spark,delta){
   return `<div class="card"><h3>${h}</h3><div class="v ${cls||''}">${v}</div>`+
@@ -264,13 +266,19 @@ function renderBadge(d){
   if(!last){ el('badge').innerHTML='<div class="badge dead"><i class="dot"></i>No sync yet</div>'; return 'dead'; }
   const hrs=(Date.now()-new Date(last).getTime())/36e5;
   const state=hrs<SYNC_FRESH_H?'live':(hrs<SYNC_DEAD_H?'stale':'dead');
-  const label=state==='live'?('Syncing · last '+ago(last)):('Last synced '+ago(last));
+  // "Syncing · last 26 min ago" read as a stuck operation with a rising counter.
+  // It only ever meant "last successful sync was 26 minutes ago", so say that.
+  const label='Synced '+ago(last);
   const note=state==='stale'
     ? ' · normal if your phone has been locked'
     : (state==='dead'?' · check the automation':'');
   el('badge').innerHTML=`<div class="badge ${state}"><i class="dot"></i>${label}${d.lastAutomation?(' · '+d.lastAutomation):''}${note}</div>`;
   return state;
 }
+
+/* Tick the relative time on its own so it stays honest between the 5-minute
+   data refreshes, rather than showing a figure that is up to 5 minutes stale. */
+setInterval(()=>{ if(D&&D.lastSync&&!D.empty) try{ renderBadge(D) }catch(e){} }, 30000);
 
 function render(){
   const d=D;
